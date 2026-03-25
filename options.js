@@ -39,11 +39,7 @@ function showToast(id, text, isError = false) {
 
 (async function loadGeneralSettings() {
   // Load defaults from config.json shipped with the extension
-  let defaults = {
-    notebookApiUrl: "",
-    notebookId: "",
-    notebookApiPassword: ""
-  };
+  let defaults = { sessionMode: "reuse" };
   try {
     const resp = await fetch(chrome.runtime.getURL('config.json'));
     if (resp.ok) defaults = await resp.json();
@@ -51,22 +47,16 @@ function showToast(id, text, isError = false) {
 
   const cfg = await chrome.storage.sync.get({
     hostPatterns: "",
-    notebookApiUrl: defaults.notebookApiUrl || "",
-    notebookId: defaults.notebookId || "",
-    notebookApiPassword: defaults.notebookApiPassword || ""
+    sessionMode: defaults.sessionMode || "reuse"
   });
   document.getElementById('hostPatterns').value = cfg.hostPatterns || "";
-  document.getElementById('notebookApiUrl').value = cfg.notebookApiUrl;
-  document.getElementById('notebookId').value = cfg.notebookId;
-  document.getElementById('notebookApiPassword').value = cfg.notebookApiPassword;
+  document.getElementById('sessionMode').value = cfg.sessionMode || "reuse";
 })();
 
 document.getElementById('saveGeneral').addEventListener('click', async () => {
   const hostPatterns = document.getElementById('hostPatterns').value;
-  const notebookApiUrl = document.getElementById('notebookApiUrl').value.trim();
-  const notebookId = document.getElementById('notebookId').value.trim();
-  const notebookApiPassword = document.getElementById('notebookApiPassword').value.trim();
-  await chrome.storage.sync.set({ hostPatterns, notebookApiUrl, notebookId, notebookApiPassword });
+  const sessionMode = document.getElementById('sessionMode').value;
+  await chrome.storage.sync.set({ hostPatterns, sessionMode });
   showToast('statusGeneral', '✅ Đã lưu!');
 });
 

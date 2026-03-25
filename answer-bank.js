@@ -55,6 +55,28 @@ const AnswerBank = (() => {
     return jaccardSimilarity(a, b);
   }
 
+  // ── Option Set Similarity ──
+  // For each bank option, find the best textSimilarity against page options, return average
+  function computeOptionSimilarity(bankOptions, cleanPageOpts) {
+    if (!bankOptions || !cleanPageOpts || !cleanPageOpts.length) return 0;
+    const bankLetters = Object.keys(bankOptions).filter(k => /^[A-F]$/i.test(k));
+    if (!bankLetters.length) return 0;
+
+    let totalScore = 0;
+    let counted = 0;
+    for (const bl of bankLetters) {
+      const bankText = bankOptions[bl] || '';
+      if (!bankText) continue;
+      let bestScore = 0;
+      for (const pageText of cleanPageOpts) {
+        bestScore = Math.max(bestScore, textSimilarity(bankText, pageText));
+      }
+      totalScore += bestScore;
+      counted++;
+    }
+    return counted > 0 ? totalScore / counted : 0;
+  }
+
   // ── Load Question Bank ──
   async function loadAnswerBank(filePaths) {
     // Invalidate cache each time to pick up new questions from storage
@@ -107,41 +129,59 @@ const AnswerBank = (() => {
     }
 
     console.log(`[AnswerBank] Searching for: "${question.substring(0, 80)}..." in ${bank.length} entries`);
-    console.log(`[AnswerBank] 🔍 pageOptions received:`, JSON.stringify(pageOptions), `(length: ${(pageOptions||[]).length})`);
+    console.log(`[AnswerBank] 🔍 pageOptions received:`, JSON.stringify(pageOptions), `(length: ${(pageOptions || []).length})`);
 
-    // 1. Collect ALL matches above threshold
+    // 0. Clean page options once upfront for option similarity
+    const cleanPageOpts = (pageOptions || []).map(o =>
+      (o || '').toString().trim().replace(/^[A-Da-d][).\\:\s]\s*/, '')
+    );
+    const hasPageOpts = cleanPageOpts.length > 0;
+
+    // 1. Collect ALL matches above threshold, compute option similarity
     const allMatches = [];
     for (const entry of bank) {
-      const score = textSimilarity(question, entry.question);
-      if (score >= QUESTION_MATCH_THRESHOLD) {
+      const qScore = textSimilarity(question, entry.question);
+      if (qScore >= QUESTION_MATCH_THRESHOLD) {
         const ansLetter = (entry.answer || '').trim().charAt(0).toUpperCase();
         const ansText = entry.options?.[ansLetter] || '';
+        const optScore = hasPageOpts ? computeOptionSimilarity(entry.options || {}, cleanPageOpts) : 0;
+        // Combined score: 50% question + 50% option (fall back to question-only if no page options)
+        const combinedScore = hasPageOpts ? (0.5 * qScore + 0.5 * optScore) : qScore;
         allMatches.push({
           entry,
-          score,
+          score: qScore,
+          optionScore: optScore,
+          combinedScore,
           answerLetter: ansLetter,
           answerText: ansText
         });
       }
     }
 
-    // Sort by score descending
-    allMatches.sort((a, b) => b.score - a.score);
+    // Sort by combined score descending (considers both question & option fit)
+    allMatches.sort((a, b) => b.combinedScore - a.combinedScore);
 
     console.log(`[AnswerBank] Found ${allMatches.length} matches above threshold ${QUESTION_MATCH_THRESHOLD}`);
+    if (allMatches.length) {
+      console.log(`[AnswerBank] Top 3 candidates:`, allMatches.slice(0, 3).map(m =>
+        `qScore=${m.score.toFixed(2)}, optScore=${m.optionScore.toFixed(2)}, combined=${m.combinedScore.toFixed(2)}, q="${m.entry.question?.substring(0, 50)}..."`
+      ));
+    }
     if (!allMatches.length) return null;
 
     // 2. Build allMatches list (lightweight info for display)
     const matchList = allMatches.map(m => ({
       question: m.entry.question,
       questionScore: m.score,
+      optionSimilarityScore: m.optionScore,
+      combinedScore: m.combinedScore,
       answerLetter: m.answerLetter,
       answerText: m.answerText,
       options: m.entry.options || {},
       explanation: m.entry.explanation || ''
     }));
 
-    // 3. Full option mapping only for the BEST match (top-1)
+    // 3. Full option mapping only for the BEST match (top-1 by combined score)
     const best = allMatches[0];
     const bestEntry = best.entry;
     const answerLetter = best.answerLetter;
@@ -169,10 +209,7 @@ const AnswerBank = (() => {
 
     // 4. Map answer to page option order (handle shuffled ABCD)
     const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
-
-    const cleanPageOpts = (pageOptions || []).map(o => 
-      (o || '').toString().trim().replace(/^[A-Da-d][).\\:\s]\s*/, '')
-    );
+    // cleanPageOpts already computed at top of function
 
     console.log('[AnswerBank] 🔍 cleanPageOpts:', JSON.stringify(cleanPageOpts), `(length: ${cleanPageOpts.length})`);
 
@@ -181,7 +218,7 @@ const AnswerBank = (() => {
 
     if (cleanPageOpts.length && bestEntry.options) {
       const bankLetters = Object.keys(bestEntry.options).filter(k => /^[A-F]$/i.test(k));
-      
+
       console.log('[AnswerBank] ✅ Entering mapping block');
       console.log('[AnswerBank] Bank letters:', bankLetters);
       console.log('[AnswerBank] Page options:', cleanPageOpts);
@@ -196,14 +233,14 @@ const AnswerBank = (() => {
         for (let j = 0; j < cleanPageOpts.length; j++) {
           const s = textSimilarity(bankText, cleanPageOpts[j]);
           scoredPairs.push({ bankLetter: bl.toUpperCase(), pageIdx: j, score: s });
-          console.log(`[AnswerBank]   similarity("${bankText.substring(0,30)}", "${cleanPageOpts[j].substring(0,30)}") = ${s.toFixed(3)}`);
+          console.log(`[AnswerBank]   similarity("${bankText.substring(0, 30)}", "${cleanPageOpts[j].substring(0, 30)}") = ${s.toFixed(3)}`);
         }
       }
 
       // Sort descending by score — highest similarity pairs first
       scoredPairs.sort((a, b) => b.score - a.score);
 
-      console.log('[AnswerBank] Top scored pairs:', scoredPairs.slice(0, 8).map(p => 
+      console.log('[AnswerBank] Top scored pairs:', scoredPairs.slice(0, 8).map(p =>
         `${p.bankLetter}→Page[${p.pageIdx}]=${p.score.toFixed(2)}`
       ).join(', '));
 
@@ -217,7 +254,7 @@ const AnswerBank = (() => {
         bankToPage[pair.bankLetter] = { pageIdx: pair.pageIdx, score: pair.score };
         usedBank.add(pair.bankLetter);
         usedPage.add(pair.pageIdx);
-        console.log(`[AnswerBank] ✅ Mapped: Bank ${pair.bankLetter}="${bestEntry.options[pair.bankLetter]}" → Page[${pair.pageIdx}]="${cleanPageOpts[pair.pageIdx]||'?'}" (score=${pair.score.toFixed(2)})`);
+        console.log(`[AnswerBank] ✅ Mapped: Bank ${pair.bankLetter}="${bestEntry.options[pair.bankLetter]}" → Page[${pair.pageIdx}]="${cleanPageOpts[pair.pageIdx] || '?'}" (score=${pair.score.toFixed(2)})`);
       }
 
       console.log('[AnswerBank] Final bankToPage:', JSON.stringify(bankToPage));
@@ -228,7 +265,7 @@ const AnswerBank = (() => {
         mappedIdx = mapping.pageIdx;
         mappedScore = mapping.score;
       }
-      console.log('[AnswerBank] Final mapped answer:', letters[mappedIdx] || answerLetter, '(mappedIdx='+mappedIdx+', score='+mappedScore.toFixed(2)+')');
+      console.log('[AnswerBank] Final mapped answer:', letters[mappedIdx] || answerLetter, '(mappedIdx=' + mappedIdx + ', score=' + mappedScore.toFixed(2) + ')');
     } else {
       console.log('[AnswerBank] ❌ SKIPPED mapping block! cleanPageOpts.length:', cleanPageOpts.length, 'bestEntry.options:', !!bestEntry.options);
     }

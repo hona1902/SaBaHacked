@@ -1,5 +1,6 @@
 {
   "notebookApiUrl": "https://sotay5491.io.vn/api",
   "notebookId": "notebook:orsrbbj4tvvngnpg0o1d",
-  "notebookApiPassword": "change-me-to-a-secret-string"
+  "notebookApiPassword": "[PASSWORD]",
+  "sessionMode": "reuse"
 }

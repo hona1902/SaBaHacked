@@ -386,33 +386,17 @@
       <small>Extension chỉ highlight trên các trang khớp mẫu này.</small>
     </div>
 
-    <!-- Open Notebook Settings -->
+    <!-- ChatBot Settings -->
     <div style="margin-top:16px; padding-top:16px; border-top:1.5px solid var(--border);">
-      <div style="font-size:13px; font-weight:700; color:var(--primary); margin-bottom:12px;">📓 Open Notebook (Hỏi AI)</div>
+      <div style="font-size:13px; font-weight:700; color:var(--primary); margin-bottom:12px;">🤖 ChatBot - HNA Soft</div>
 
       <div class="field">
-        <label>Notebook API URL</label>
-        <div class="field-with-toggle">
-          <input id="notebookApiUrl" type="password" placeholder="https://sotay5491.io.vn/api" />
-          <button type="button" class="toggle-visibility" data-target="notebookApiUrl" title="Hiện/Ẩn">👁️</button>
-        </div>
-        <small>Base URL của Open Notebook API (không có dấu / cuối).</small>
-      </div>
-
-      <div class="field">
-        <label>Notebook ID</label>
-        <div class="field-with-toggle">
-          <input id="notebookId" type="password" placeholder="notebook:orsrbbj4tvvngnpg0o1d" />
-          <button type="button" class="toggle-visibility" data-target="notebookId" title="Hiện/Ẩn">👁️</button>
-        </div>
-      </div>
-
-      <div class="field">
-        <label>Notebook API Password</label>
-        <div class="field-with-toggle">
-          <input id="notebookApiPassword" type="password" placeholder="Mật khẩu API" />
-          <button type="button" class="toggle-visibility" data-target="notebookApiPassword" title="Hiện/Ẩn">👁️</button>
-        </div>
+        <label>Chế độ Session</label>
+        <select id="sessionMode">
+          <option value="reuse">Dùng 1 session cho tất cả câu hỏi</option>
+          <option value="new">Mỗi câu hỏi tạo session mới</option>
+        </select>
+        <small>Mặc định: Dùng 1 session — mỗi máy/trình duyệt dùng chung 1 session để giảm tải server.</small>
       </div>
     </div>
 

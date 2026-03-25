@@ -202,40 +202,40 @@ document.getElementById('pullFromPage').addEventListener('click', async () => {
                     return lbl ? { text: (lbl.innerText || '').trim(), path: '' } : null;
                   }).filter(Boolean);
                   // Find question text for THIS radio group via DOM ancestry
-                   const firstRadio = grp[0];
-                   // Method A: Walk up to find ancestor containing .scp-qtext
-                   let ancestor = firstRadio.closest('.scp-dbtncont')?.parentElement || firstRadio.parentElement;
-                   let depth = 0;
-                   while (ancestor && depth < 8) {
-                     const qT = ancestor.querySelector('.scp-qtext');
-                     if (qT && ancestor.contains(firstRadio)) { q = (qT.innerText||'').trim(); break; }
-                     ancestor = ancestor.parentElement; depth++;
-                   }
-                   // Method B: Previous sibling walk
-                   if (!q) {
-                     let el = firstRadio.closest('.scp-dbtncont'); let d2 = 0;
-                     while (el && d2 < 6) {
-                       let prev = el.previousElementSibling; let h = 0;
-                       while (prev && h < 3) {
-                         if (prev.classList?.contains('scp-qtext')) { q = (prev.innerText||'').trim(); break; }
-                         const nested = prev.querySelector('.scp-qtext');
-                         if (nested) { q = (nested.innerText||'').trim(); break; }
-                         prev = prev.previousElementSibling; h++;
-                       }
-                       if (q) break;
-                       el = el.parentElement; d2++;
-                     }
-                   }
-                   // Method C: Position fallback
-                   if (!q) {
-                     const firstTop = firstRadio.getBoundingClientRect().top;
-                     let bestDist = Infinity;
-                     document.querySelectorAll('.scp-qtext').forEach(el => {
-                       const bottom = el.getBoundingClientRect().bottom;
-                       const dist = firstTop - bottom;
-                       if (dist >= -20 && dist < bestDist) { bestDist = dist; q = (el.innerText||'').trim(); }
-                     });
-                   }
+                  const firstRadio = grp[0];
+                  // Method A: Walk up to find ancestor containing .scp-qtext
+                  let ancestor = firstRadio.closest('.scp-dbtncont')?.parentElement || firstRadio.parentElement;
+                  let depth = 0;
+                  while (ancestor && depth < 8) {
+                    const qT = ancestor.querySelector('.scp-qtext');
+                    if (qT && ancestor.contains(firstRadio)) { q = (qT.innerText || '').trim(); break; }
+                    ancestor = ancestor.parentElement; depth++;
+                  }
+                  // Method B: Previous sibling walk
+                  if (!q) {
+                    let el = firstRadio.closest('.scp-dbtncont'); let d2 = 0;
+                    while (el && d2 < 6) {
+                      let prev = el.previousElementSibling; let h = 0;
+                      while (prev && h < 3) {
+                        if (prev.classList?.contains('scp-qtext')) { q = (prev.innerText || '').trim(); break; }
+                        const nested = prev.querySelector('.scp-qtext');
+                        if (nested) { q = (nested.innerText || '').trim(); break; }
+                        prev = prev.previousElementSibling; h++;
+                      }
+                      if (q) break;
+                      el = el.parentElement; d2++;
+                    }
+                  }
+                  // Method C: Position fallback
+                  if (!q) {
+                    const firstTop = firstRadio.getBoundingClientRect().top;
+                    let bestDist = Infinity;
+                    document.querySelectorAll('.scp-qtext').forEach(el => {
+                      const bottom = el.getBoundingClientRect().bottom;
+                      const dist = firstTop - bottom;
+                      if (dist >= -20 && dist < bestDist) { bestDist = dist; q = (el.innerText || '').trim(); }
+                    });
+                  }
                 }
               }
 
@@ -290,11 +290,7 @@ document.getElementById('pullFromPage').addEventListener('click', async () => {
 });
 
 // ── Open Notebook Chat Helper ──
-async function notebookChat(apiUrl, notebookId, password, questionText) {
-  // Normalize base URL: the backend mounts all routers at /api prefix,
-  // so if user's API_URL already ends with /api we need to keep it as the
-  // base and still prepend /api to the route paths (e.g. /api/chat/sessions).
-  // Strip trailing slash, then ensure we build the correct full path.
+async function notebookChat(apiUrl, notebookId, password, questionText, sessionMode = 'reuse') {
   const base = apiUrl.replace(/\/+$/, '');
 
   const headers = {
@@ -302,14 +298,39 @@ async function notebookChat(apiUrl, notebookId, password, questionText) {
     ...(password ? { "Authorization": `Bearer ${password}` } : {})
   };
 
-  // Step 1: Create a chat session
-  const sessionResp = await fetch(`${base}/api/chat/sessions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ notebook_id: notebookId })
-  });
-  if (!sessionResp.ok) throw new Error(`Tạo session thất bại: HTTP ${sessionResp.status}`);
-  const session = await sessionResp.json();
+  // Helper: create a new session and optionally save to local storage
+  async function createNewSession(save = false) {
+    const sessionResp = await fetch(`${base}/api/chat/sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ notebook_id: notebookId })
+    });
+    if (!sessionResp.ok) throw new Error(`Tạo session thất bại: HTTP ${sessionResp.status}`);
+    const session = await sessionResp.json();
+    if (save) {
+      await chrome.storage.local.set({
+        currentSessionId: session.id,
+        currentSessionNotebookId: notebookId
+      });
+    }
+    return session;
+  }
+
+  // Step 1: Get or create session based on mode
+  let session;
+  if (sessionMode === 'reuse') {
+    // Try to reuse existing session
+    const stored = await chrome.storage.local.get({ currentSessionId: null, currentSessionNotebookId: null });
+    if (stored.currentSessionId && stored.currentSessionNotebookId === notebookId) {
+      session = { id: stored.currentSessionId };
+    } else {
+      // No existing session or different notebook → create new & save
+      session = await createNewSession(true);
+    }
+  } else {
+    // Mode "new" — always create a fresh session (original behavior)
+    session = await createNewSession(false);
+  }
 
   // Step 2: Build context (all sources/notes)
   const contextResp = await fetch(`${base}/api/chat/context`, {
@@ -321,7 +342,7 @@ async function notebookChat(apiUrl, notebookId, password, questionText) {
   const contextData = await contextResp.json();
 
   // Step 3: Execute chat
-  const chatResp = await fetch(`${base}/api/chat/execute`, {
+  let chatResp = await fetch(`${base}/api/chat/execute`, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -330,6 +351,22 @@ async function notebookChat(apiUrl, notebookId, password, questionText) {
       context: contextData.context
     })
   });
+
+  // If reuse mode and chat failed → session might be expired, retry with new session
+  if (!chatResp.ok && sessionMode === 'reuse') {
+    console.warn(`[NotebookChat] Session ${session.id} failed (HTTP ${chatResp.status}), creating new session...`);
+    session = await createNewSession(true);
+    chatResp = await fetch(`${base}/api/chat/execute`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        session_id: session.id,
+        message: questionText,
+        context: contextData.context
+      })
+    });
+  }
+
   if (!chatResp.ok) throw new Error(`Chat thất bại: HTTP ${chatResp.status}`);
   return await chatResp.json();
 }
@@ -384,7 +421,7 @@ function renderNotebookResult(data) {
   const lastAI = aiMessages[aiMessages.length - 1];
   const content = lastAI ? lastAI.content : "Không có phản hồi từ AI.";
   el.innerHTML = `<div style="padding:12px; background:#EDF7ED; border-radius:8px; border-left:4px solid #4CAF50;">
-    <div style="font-weight:600; color:#2E7D32; margin-bottom:6px;">📓 Open Notebook AI</div>
+    <div style="font-weight:600; color:#2E7D32; margin-bottom:6px;">🤖 ChatBot - HNA Soft</div>
     <div class="md-content">${simpleMarkdownToHtml(content)}</div>
   </div>`;
 }
@@ -392,13 +429,21 @@ function renderNotebookResult(data) {
 document.getElementById('ask').addEventListener('click', async () => {
   const q = document.getElementById('question').value.trim();
   if (!q) return alert("Please enter or select a question.");
+  // Load API credentials from bundled config.json (not user-editable)
+  let cfgDefaults = {};
+  try {
+    const resp = await fetch(chrome.runtime.getURL('config.json'));
+    if (resp.ok) cfgDefaults = await resp.json();
+  } catch (_) { }
+
   const cfg = await chrome.storage.sync.get({
     hostPatterns: "",
     localBankFiles: "data/cong-nghe-so.json",
-    notebookApiUrl: "",
-    notebookId: "",
-    notebookApiPassword: ""
+    sessionMode: cfgDefaults.sessionMode || "reuse"
   });
+  cfg.notebookApiUrl = cfgDefaults.notebookApiUrl || "";
+  cfg.notebookId = cfgDefaults.notebookId || "";
+  cfg.notebookApiPassword = cfgDefaults.notebookApiPassword || "";
 
   const tab = await getTargetTab();
 
@@ -466,21 +511,22 @@ document.getElementById('ask').addEventListener('click', async () => {
 
   // ── OPEN NOTEBOOK API ──
   if (!cfg.notebookApiUrl || !cfg.notebookId) {
-    document.getElementById('results').innerHTML = `<div style="color:#dc2626;">❌ Chưa cấu hình Notebook. Vào Settings để nhập Notebook API URL và Notebook ID.</div>`;
+    document.getElementById('results').innerHTML = `<div style="color:#dc2626;">❌ Chưa cấu hình ChatBot trong Cài đặt. Vui lòng vào Cài đặt, nhấn Lưu cài đặt để cấu hình ChatBot.</div>`;
     return;
   }
 
-  document.getElementById('results').innerHTML = "📓 Đang hỏi Open Notebook AI…";
+  document.getElementById('results').innerHTML = "🤖 Đang hỏi ChatBot…";
   try {
     const data = await notebookChat(
       cfg.notebookApiUrl,
       cfg.notebookId,
       cfg.notebookApiPassword,
-      q
+      q,
+      cfg.sessionMode || 'reuse'
     );
     renderNotebookResult(data);
   } catch (e) {
-    document.getElementById('results').innerHTML = `<div style="color:#dc2626;">❌ Open Notebook Error: ${escapeHtml(e.message)}</div>`;
+    document.getElementById('results').innerHTML = `<div style="color:#dc2626;">❌ ChatBot Error: ${escapeHtml(e.message)}</div>`;
   }
 });
 
@@ -519,7 +565,21 @@ function renderLocalResult(result) {
 
   let html = `<div style="padding:10px; background:#e8f5e9; border-radius:8px; border-left:4px solid #4caf50; margin-bottom:8px;">`;
   html += `<div style="font-weight:600; color:#2e7d32; margin-bottom:6px;">📚 Tìm thấy đáp án cục bộ! (${scorePercent}% khớp)</div>`;
-  html += `<div style="margin-bottom:6px; padding:6px 8px; background:#f1f8e9; border-radius:4px; font-size:12px; color:#555;"><strong>📝 Câu hỏi trong đề:</strong> ${escapeHtml((result.matchedQuestion || '').substring(0, 150))}${result.matchedQuestion?.length > 150 ? '...' : ''}</div>`;
+  html += `<div style="margin-bottom:6px; padding:6px 8px; background:#f1f8e9; border-radius:4px; font-size:12px; color:#555;"><strong>📝 Câu hỏi trong đề:</strong> ${escapeHtml(result.matchedQuestion || '')}</div>`;
+
+  // Show all options A/B/C/D from bank
+  if (result.bankOptions) {
+    const optLetters = Object.keys(result.bankOptions).filter(k => /^[A-F]$/i.test(k)).sort();
+    if (optLetters.length) {
+      html += `<div style="margin:4px 0 6px 4px; font-size:12px; color:#555;">`;
+      for (const l of optLetters) {
+        const isCorrect = l.toUpperCase() === result.mappedAnswer;
+        html += `<div style="${isCorrect ? 'font-weight:600; color:#2e7d32;' : ''}">${escapeHtml(l)}. ${escapeHtml(result.bankOptions[l] || '')}</div>`;
+      }
+      html += `</div>`;
+    }
+  }
+
   html += `<div style="margin-bottom:4px;"><strong>Đáp án: ${escapeHtml(result.mappedAnswer)}</strong></div>`;
   html += `<div style="margin-bottom:4px; color:#555;">${escapeHtml(result.mappedAnswerText)}</div>`;
 

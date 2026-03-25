@@ -54,6 +54,28 @@ async function handleCaptureResult(dataUrl) {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('RAG Assist extension installed');
+chrome.runtime.onInstalled.addListener(async (details) => {
+  console.log('SabaHacked extension installed/updated:', details.reason);
+
+  // Auto-initialize settings from bundled config.json
+  try {
+    const resp = await fetch(chrome.runtime.getURL('config.json'));
+    if (!resp.ok) return;
+    const defaults = await resp.json();
+
+    // Only set keys that are NOT already in storage (preserve user overrides)
+    const existing = await chrome.storage.sync.get(null);
+    const toSet = {};
+    for (const [key, value] of Object.entries(defaults)) {
+      if (!(key in existing)) {
+        toSet[key] = value;
+      }
+    }
+    if (Object.keys(toSet).length > 0) {
+      await chrome.storage.sync.set(toSet);
+      console.log('Auto-initialized settings from config.json:', Object.keys(toSet));
+    }
+  } catch (e) {
+    console.error('Failed to auto-init settings:', e);
+  }
 });
