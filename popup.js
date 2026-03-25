@@ -7,6 +7,13 @@ document.getElementById('settings').addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
 
+// Clear button — reset textarea and results
+document.getElementById('clearAll').addEventListener('click', () => {
+  document.getElementById('question').value = '';
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('question').focus();
+});
+
 // Removed legacy "Open as window" behavior
 
 function formatQuestionWithOptions(question, options) {
@@ -439,11 +446,19 @@ document.getElementById('ask').addEventListener('click', async () => {
   const cfg = await chrome.storage.sync.get({
     hostPatterns: "",
     localBankFiles: "data/cong-nghe-so.json",
-    sessionMode: cfgDefaults.sessionMode || "reuse"
+    sessionMode: cfgDefaults.sessionMode || "reuse",
+    selectedNotebookId: ""
   });
   cfg.notebookApiUrl = cfgDefaults.notebookApiUrl || "";
-  cfg.notebookId = cfgDefaults.notebookId || "";
   cfg.notebookApiPassword = cfgDefaults.notebookApiPassword || "";
+
+  // Resolve notebook ID: saved selection → first in notebooks array → old notebookId
+  const notebooks = cfgDefaults.notebooks || [];
+  let resolvedNotebookId = cfg.selectedNotebookId;
+  if (!resolvedNotebookId || !notebooks.some(nb => nb.id === resolvedNotebookId)) {
+    resolvedNotebookId = notebooks.length ? notebooks[0].id : (cfgDefaults.notebookId || "");
+  }
+  cfg.notebookId = resolvedNotebookId;
 
   const tab = await getTargetTab();
 
@@ -511,7 +526,7 @@ document.getElementById('ask').addEventListener('click', async () => {
 
   // ── OPEN NOTEBOOK API ──
   if (!cfg.notebookApiUrl || !cfg.notebookId) {
-    document.getElementById('results').innerHTML = `<div style="color:#dc2626;">❌ Chưa cấu hình ChatBot trong Cài đặt. Vui lòng vào Cài đặt, nhấn Lưu cài đặt để cấu hình ChatBot.</div>`;
+    document.getElementById('results').innerHTML = `<div style="color:#dc2626;">❌ Chưa cấu hình Notebook trong Cài đặt. Vui lòng vào Cài đặt, chọn Notebook và nhấn Lưu.</div>`;
     return;
   }
 
@@ -565,31 +580,36 @@ function renderLocalResult(result) {
 
   let html = `<div style="padding:10px; background:#e8f5e9; border-radius:8px; border-left:4px solid #4caf50; margin-bottom:8px;">`;
   html += `<div style="font-weight:600; color:#2e7d32; margin-bottom:6px;">📚 Tìm thấy đáp án cục bộ! (${scorePercent}% khớp)</div>`;
-  html += `<div style="margin-bottom:6px; padding:6px 8px; background:#f1f8e9; border-radius:4px; font-size:12px; color:#555;"><strong>📝 Câu hỏi trong đề:</strong> ${escapeHtml(result.matchedQuestion || '')}</div>`;
 
-  // Show all options A/B/C/D from bank
+  // ── Answer block (prominent, at top) ──
+  html += `<div style="margin:8px 0; padding:10px 12px; background:#c8e6c9; border-radius:6px; font-size:15px; font-weight:700; color:#1b5e20;">🎯 Đáp án: ${escapeHtml(result.mappedAnswer)}. ${escapeHtml(result.mappedAnswerText)}</div>`;
+
+  // ── Mapping info ──
+  if (result.originalAnswer !== result.mappedAnswer) {
+    html += `<div style="font-size:12px; color:#888; margin-bottom:4px;">📎 Đáp án gốc: ${escapeHtml(result.originalAnswer)}. ${escapeHtml(result.originalAnswerText)} → Đã ánh xạ sang ${escapeHtml(result.mappedAnswer)} (${optScore}% khớp)</div>`;
+  }
+
+  // ── Explanation ──
+  if (result.explanation) {
+    html += `<div style="margin:6px 0; padding:6px 8px; background:#f1f8e9; border-radius:4px; font-size:13px;"><em>💡 ${escapeHtml(result.explanation)}</em></div>`;
+  }
+
+  // ── Question text (moved below answer) ──
+  html += `<div style="margin:8px 0 6px 0; padding:6px 8px; background:#f1f8e9; border-radius:4px; font-size:12px; color:#555;"><strong>📝 Câu hỏi trong đề:</strong> ${escapeHtml(result.matchedQuestion || '')}</div>`;
+
+  // ── Options A/B/C/D from bank (moved below question) ──
   if (result.bankOptions) {
     const optLetters = Object.keys(result.bankOptions).filter(k => /^[A-F]$/i.test(k)).sort();
     if (optLetters.length) {
       html += `<div style="margin:4px 0 6px 4px; font-size:12px; color:#555;">`;
       for (const l of optLetters) {
-        const isCorrect = l.toUpperCase() === result.mappedAnswer;
+        const isCorrect = l.toUpperCase() === result.originalAnswer;
         html += `<div style="${isCorrect ? 'font-weight:600; color:#2e7d32;' : ''}">${escapeHtml(l)}. ${escapeHtml(result.bankOptions[l] || '')}</div>`;
       }
       html += `</div>`;
     }
   }
 
-  html += `<div style="margin-bottom:4px;"><strong>Đáp án: ${escapeHtml(result.mappedAnswer)}</strong></div>`;
-  html += `<div style="margin-bottom:4px; color:#555;">${escapeHtml(result.mappedAnswerText)}</div>`;
-
-  if (result.originalAnswer !== result.mappedAnswer) {
-    html += `<div style="font-size:12px; color:#888; margin-bottom:4px;">📎 Đáp án gốc: ${escapeHtml(result.originalAnswer)}. ${escapeHtml(result.originalAnswerText)} → Đã ánh xạ sang ${escapeHtml(result.mappedAnswer)} (${optScore}% khớp)</div>`;
-  }
-
-  if (result.explanation) {
-    html += `<div style="margin-top:6px; padding:6px 8px; background:#f1f8e9; border-radius:4px; font-size:13px;"><em>💡 ${escapeHtml(result.explanation)}</em></div>`;
-  }
   html += `</div>`;
 
   // ── All Matches List ──

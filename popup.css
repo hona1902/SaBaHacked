@@ -34,6 +34,7 @@ body {
   color: var(--text);
   background: var(--bg);
   min-width: 380px;
+  min-height: 680px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -220,6 +221,23 @@ textarea::placeholder {
 }
 
 .btn-ai:active {
+  transform: scale(0.97);
+}
+
+.btn-clear {
+  background: var(--bg-card);
+  color: var(--text-light);
+  border-color: var(--border);
+  flex: 0 0 auto;
+}
+
+.btn-clear:hover {
+  background: #fde8e8;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.btn-clear:active {
   transform: scale(0.97);
 }
 

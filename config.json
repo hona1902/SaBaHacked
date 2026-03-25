@@ -1,6 +1,15 @@
 {
   "notebookApiUrl": "https://sotay5491.io.vn/api",
-  "notebookId": "notebook:orsrbbj4tvvngnpg0o1d",
+  "notebooks": [
+    {
+      "id": "notebook:orsrbbj4tvvngnpg0o1d",
+      "name": "Tín dụng"
+    },
+    {
+      "id": "notebook:z5mnq7ex1w57rw5dgvdj",
+      "name": "Kế toán"
+    }
+  ],
   "notebookApiPassword": "[PASSWORD]",
   "sessionMode": "reuse"
 }

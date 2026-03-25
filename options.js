@@ -1,7 +1,7 @@
 /**
  * options.js — Settings page logic
  * Tab switching, general settings, question bank management,
- * Excel upload (SheetJS), and JSON import.
+ * and Excel upload (SheetJS).
  */
 
 // ── Tab Switching ──
@@ -47,16 +47,45 @@ function showToast(id, text, isError = false) {
 
   const cfg = await chrome.storage.sync.get({
     hostPatterns: "",
-    sessionMode: defaults.sessionMode || "reuse"
+    sessionMode: defaults.sessionMode || "reuse",
+    selectedNotebookId: ""
   });
   document.getElementById('hostPatterns').value = cfg.hostPatterns || "";
   document.getElementById('sessionMode').value = cfg.sessionMode || "reuse";
+
+  // Populate notebook picker from config.json
+  const notebookPicker = document.getElementById('notebookPicker');
+  let notebooks = defaults.notebooks || [];
+  // Backward compatibility: if old notebookId exists and no notebooks array
+  if (!notebooks.length && defaults.notebookId) {
+    notebooks = [{ id: defaults.notebookId, name: defaults.notebookId }];
+  }
+
+  notebookPicker.innerHTML = '';
+  if (!notebooks.length) {
+    notebookPicker.innerHTML = '<option value="">-- Chưa cấu hình notebook --</option>';
+  } else {
+    for (const nb of notebooks) {
+      const opt = document.createElement('option');
+      opt.value = nb.id;
+      opt.textContent = nb.name || nb.id;
+      notebookPicker.appendChild(opt);
+    }
+    // Restore saved selection
+    if (cfg.selectedNotebookId && notebooks.some(nb => nb.id === cfg.selectedNotebookId)) {
+      notebookPicker.value = cfg.selectedNotebookId;
+    } else {
+      // Default to first notebook
+      notebookPicker.value = notebooks[0].id;
+    }
+  }
 })();
 
 document.getElementById('saveGeneral').addEventListener('click', async () => {
   const hostPatterns = document.getElementById('hostPatterns').value;
   const sessionMode = document.getElementById('sessionMode').value;
-  await chrome.storage.sync.set({ hostPatterns, sessionMode });
+  const selectedNotebookId = document.getElementById('notebookPicker').value;
+  await chrome.storage.sync.set({ hostPatterns, sessionMode, selectedNotebookId });
   showToast('statusGeneral', '✅ Đã lưu!');
 });
 
@@ -121,7 +150,6 @@ async function loadBankList() {
   const files = await getBankFiles();
   const banks = await getStorageBanks();
   const selectEl = document.getElementById('targetBank');
-  const selectJsonEl = document.getElementById('targetBankJson');
 
   // Merge all banks
   const allBanks = new Set(files);
@@ -132,7 +160,6 @@ async function loadBankList() {
   if (!allBanks.size) {
     listEl.innerHTML = '<div class="bank-empty">Chưa có ngân hàng nào. Tạo mới bên dưới!</div>';
     selectEl.innerHTML = '<option value="">-- Chưa có ngân hàng --</option>';
-    if (selectJsonEl) selectJsonEl.innerHTML = '<option value="">-- Chưa có ngân hàng --</option>';
     return;
   }
 
@@ -145,12 +172,20 @@ async function loadBankList() {
     const typeLabel = isBundled ? 'Bundled' : 'Custom';
     const typeClass = isBundled ? 'bundled' : 'custom';
 
+    const clearBtn = !isBundled
+      ? `<button class="clear-bank" data-bank="${escapeAttr(name)}" title="Xóa toàn bộ câu hỏi">🧹</button>`
+      : '';
+
     html += `
-      <div class="bank-item" data-bank="${escapeAttr(name)}">
-        <span class="bank-type ${typeClass}">${typeLabel}</span>
-        <span class="bank-name">${escapeHtml(name)}</span>
-        <span class="bank-count">${count} câu</span>
-        <button class="btn btn-danger btn-sm delete-bank" data-bank="${escapeAttr(name)}" title="Xoá">🗑️</button>
+      <div class="bank-item-wrapper" data-bank="${escapeAttr(name)}">
+        <div class="bank-item" data-bank="${escapeAttr(name)}">
+          <span class="bank-type ${typeClass}">${typeLabel}</span>
+          <span class="bank-name" title="Click để xem danh sách câu hỏi">${escapeHtml(name)}</span>
+          <span class="bank-count">${count} câu</span>
+          ${clearBtn}
+          <button class="btn btn-danger btn-sm delete-bank" data-bank="${escapeAttr(name)}" title="Xoá">🗑️</button>
+        </div>
+        <div class="bank-questions" id="questions-${escapeAttr(name)}"></div>
       </div>
     `;
 
@@ -160,11 +195,11 @@ async function loadBankList() {
 
   listEl.innerHTML = html;
   selectEl.innerHTML = selectHtml;
-  if (selectJsonEl) selectJsonEl.innerHTML = selectHtml;
 
   // Bind delete buttons for ALL banks
   listEl.querySelectorAll('.delete-bank').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       const bankName = btn.dataset.bank;
       const label = isBundledFile(bankName)
         ? `Bỏ ngân hàng "${bankName}" khỏi danh sách active?`
@@ -173,14 +208,201 @@ async function loadBankList() {
       await deleteBank(bankName);
     });
   });
+
+  // Bind clear-all buttons
+  listEl.querySelectorAll('.clear-bank').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const bankName = btn.dataset.bank;
+      if (!confirm(`Xóa toàn bộ câu hỏi trong "${bankName}"? (Ngân hàng vẫn được giữ lại)`)) return;
+      await clearAllQuestions(bankName);
+    });
+  });
+
+  // Bind bank-name click to expand/collapse question list
+  listEl.querySelectorAll('.bank-name').forEach(nameEl => {
+    nameEl.addEventListener('click', async () => {
+      const wrapper = nameEl.closest('.bank-item-wrapper');
+      const bankName = wrapper.dataset.bank;
+      const questionsEl = wrapper.querySelector('.bank-questions');
+
+      // Toggle
+      if (questionsEl.classList.contains('expanded')) {
+        questionsEl.classList.remove('expanded');
+        questionsEl.innerHTML = '';
+        return;
+      }
+
+      // Collapse all others
+      listEl.querySelectorAll('.bank-questions.expanded').forEach(el => {
+        el.classList.remove('expanded');
+        el.innerHTML = '';
+      });
+
+      // Load questions
+      await renderQuestionList(bankName, questionsEl);
+      questionsEl.classList.add('expanded');
+    });
+  });
+}
+
+// ── Clear All Questions in a Bank ──
+async function clearAllQuestions(bankName) {
+  const banks = await getStorageBanks();
+  banks[bankName] = [];
+  await saveStorageBanks(banks);
+  showToast('statusBank', `🧹 Đã xóa toàn bộ câu hỏi trong "${bankName}"`);
+  await loadBankList();
+}
+
+// ── Render Question List (expandable) ──
+async function renderQuestionList(bankName, containerEl) {
+  const isBundled = isBundledFile(bankName);
+  let questions = [];
+
+  // Try storage first
+  const banks = await getStorageBanks();
+  if (banks[bankName] && banks[bankName].length) {
+    questions = banks[bankName];
+  } else if (isBundled) {
+    // Load from bundled file
+    try {
+      const url = chrome.runtime.getURL(bankName);
+      const resp = await fetch(url);
+      if (resp.ok) questions = await resp.json();
+    } catch (_) {}
+  }
+
+  if (!questions.length) {
+    containerEl.innerHTML = '<div style="padding:10px 28px;font-size:12px;color:var(--text-muted);">Ngân hàng trống.</div>';
+    return;
+  }
+
+  let html = '';
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    const qText = escapeHtml((q.question || '').substring(0, 120));
+    const deleteBtn = !isBundled
+      ? `<button class="q-delete" data-bank="${escapeAttr(bankName)}" data-index="${i}" title="Xóa câu hỏi này">❌</button>`
+      : '';
+    html += `
+      <div class="question-row">
+        <span class="q-index">${i + 1}.</span>
+        <span class="q-text">${qText}${q.question && q.question.length > 120 ? '…' : ''}</span>
+        <span class="q-answer">${escapeHtml(q.answer || '')}</span>
+        ${deleteBtn}
+      </div>
+    `;
+  }
+  containerEl.innerHTML = html;
+
+  // Bind delete buttons
+  containerEl.querySelectorAll('.q-delete').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.index, 10);
+      const bName = btn.dataset.bank;
+      if (!confirm(`Xóa câu hỏi #${idx + 1}?`)) return;
+      await deleteQuestion(bName, idx);
+    });
+  });
+}
+
+// ── Delete Single Question ──
+async function deleteQuestion(bankName, index) {
+  const banks = await getStorageBanks();
+  if (!banks[bankName]) return;
+  banks[bankName].splice(index, 1);
+  await saveStorageBanks(banks);
+  showToast('statusBank', `🗑️ Đã xóa câu hỏi #${index + 1}`);
+  await loadBankList();
+}
+
+// ═══════════════════════════════════════════
+// SEARCH QUESTIONS
+// ═══════════════════════════════════════════
+
+const bankSearchInput = document.getElementById('bankSearch');
+let _searchTimeout = null;
+
+bankSearchInput.addEventListener('input', () => {
+  clearTimeout(_searchTimeout);
+  _searchTimeout = setTimeout(() => performSearch(bankSearchInput.value.trim()), 250);
+});
+
+async function performSearch(query) {
+  const listEl = document.getElementById('bankList');
+  const wrappers = listEl.querySelectorAll('.bank-item-wrapper');
+
+  if (!query) {
+    // Clear search: show all banks, collapse all
+    wrappers.forEach(w => {
+      w.classList.remove('hidden');
+      const qEl = w.querySelector('.bank-questions');
+      qEl.classList.remove('expanded');
+      qEl.innerHTML = '';
+    });
+    return;
+  }
+
+  const lowerQuery = query.toLowerCase();
+
+  for (const wrapper of wrappers) {
+    const bankName = wrapper.dataset.bank;
+    const questionsEl = wrapper.querySelector('.bank-questions');
+
+    // Load questions if not already expanded
+    if (!questionsEl.classList.contains('expanded')) {
+      await renderQuestionList(bankName, questionsEl);
+      questionsEl.classList.add('expanded');
+    }
+
+    // Filter question rows
+    const rows = questionsEl.querySelectorAll('.question-row');
+    let hasMatch = false;
+    rows.forEach(row => {
+      const text = (row.querySelector('.q-text')?.textContent || '').toLowerCase();
+      if (text.includes(lowerQuery)) {
+        row.classList.remove('hidden');
+        hasMatch = true;
+      } else {
+        row.classList.add('hidden');
+      }
+    });
+
+    // Hide entire bank if no matches
+    if (hasMatch) {
+      wrapper.classList.remove('hidden');
+    } else {
+      wrapper.classList.add('hidden');
+    }
+  }
 }
 
 // ── Create Bank ──
+const newBankNameInput = document.getElementById('newBankName');
+const bankNameHint = document.getElementById('bankNameHint');
+
+// Realtime validation: strip invalid characters as user types
+newBankNameInput.addEventListener('input', () => {
+  const raw = newBankNameInput.value;
+  const cleaned = raw.replace(/[^a-zA-Z0-9\-]/g, '').toLowerCase();
+  if (raw !== cleaned) {
+    newBankNameInput.value = cleaned;
+    bankNameHint.textContent = '⚠️ Chỉ cho phép a-z, 0-9, dấu gạch ngang (-). Ký tự không hợp lệ đã bị loại bỏ.';
+    bankNameHint.classList.add('warning');
+  } else {
+    bankNameHint.textContent = '';
+    bankNameHint.classList.remove('warning');
+  }
+});
+
 document.getElementById('createBank').addEventListener('click', async () => {
-  let name = document.getElementById('newBankName').value.trim();
+  let name = newBankNameInput.value.trim();
   if (!name) return showToast('statusBank', '❌ Nhập tên file!', true);
 
-  name = name.replace(/[^a-zA-Z0-9\-_]/g, '-').toLowerCase();
+  name = name.replace(/[^a-zA-Z0-9\-]/g, '').toLowerCase();
+  if (!name) return showToast('statusBank', '❌ Tên không hợp lệ!', true);
   const fullName = `data/${name}.json`;
 
   const files = await getBankFiles();
@@ -195,7 +417,8 @@ document.getElementById('createBank').addEventListener('click', async () => {
   files.push(fullName);
   await saveBankFiles(files);
 
-  document.getElementById('newBankName').value = '';
+  newBankNameInput.value = '';
+  bankNameHint.textContent = '';
   showToast('statusBank', `✅ Đã tạo "${fullName}"`);
   await loadBankList();
 });
@@ -351,43 +574,7 @@ excelImportBtn.addEventListener('click', async () => {
   await loadBankList();
 });
 
-// ═══════════════════════════════════════════
-// JSON IMPORT
-// ═══════════════════════════════════════════
 
-document.getElementById('importBtn').addEventListener('click', async () => {
-  const bankName = document.getElementById('targetBankJson').value;
-  if (!bankName) return showToast('statusImport', '❌ Chọn ngân hàng trước!', true);
-
-  const raw = document.getElementById('importJson').value.trim();
-  if (!raw) return showToast('statusImport', '❌ Paste JSON!', true);
-
-  let items;
-  try {
-    items = JSON.parse(raw);
-    if (!Array.isArray(items)) throw new Error('Not an array');
-  } catch (e) {
-    return showToast('statusImport', `❌ JSON không hợp lệ: ${e.message}`, true);
-  }
-
-  const valid = items.filter(it =>
-    it.question && it.options && it.answer &&
-    typeof it.options === 'object'
-  );
-
-  if (!valid.length) {
-    return showToast('statusImport', '❌ Không tìm thấy câu hỏi hợp lệ!', true);
-  }
-
-  const banks = await getStorageBanks();
-  if (!banks[bankName]) banks[bankName] = [];
-  banks[bankName].push(...valid);
-  await saveStorageBanks(banks);
-
-  document.getElementById('importJson').value = '';
-  showToast('statusImport', `✅ Đã import ${valid.length} câu!`);
-  await loadBankList();
-});
 
 // ═══════════════════════════════════════════
 // EXCEL TEMPLATE DOWNLOAD

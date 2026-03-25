@@ -1,18 +1,73 @@
-// Handle extension icon click - open popup as new window
+// ── Popup Window Management ──
+let popupWindowId = null;
+let isRefocusing = false;
+
+// Handle extension icon click - open popup as new window (or focus existing)
 chrome.action.onClicked.addListener(async (tab) => {
   try {
-    // Create new window with popup.html
-    await chrome.windows.create({
+    // If popup already open, just focus it
+    if (popupWindowId != null) {
+      try {
+        const existing = await chrome.windows.get(popupWindowId);
+        if (existing) {
+          // Restore if minimized, then focus
+          if (existing.state === 'minimized') {
+            await chrome.windows.update(popupWindowId, { state: 'normal', focused: true });
+          } else {
+            await chrome.windows.update(popupWindowId, { focused: true });
+          }
+          return;
+        }
+      } catch (_) {
+        // Window no longer exists, reset
+        popupWindowId = null;
+      }
+    }
+
+    // Create new popup window
+    const win = await chrome.windows.create({
       url: chrome.runtime.getURL('popup.html'),
       type: 'popup',
       width: 800,
-      height: 600,
+      height: 750,
       left: 100,
       top: 100,
       focused: true
     });
+    popupWindowId = win.id;
   } catch (error) {
     console.error('Error opening popup:', error);
+  }
+});
+
+// ── Always-on-top: refocus popup when other windows gain focus ──
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  // Skip if no popup, if popup itself got focus, or already refocusing
+  if (popupWindowId == null || windowId === popupWindowId || isRefocusing) return;
+  // chrome.windows.WINDOW_ID_NONE means all windows lost focus (e.g. alt-tab away from Chrome)
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+
+  // Small debounce to avoid rapid focus loops
+  isRefocusing = true;
+  setTimeout(async () => {
+    try {
+      const popup = await chrome.windows.get(popupWindowId);
+      // Don't refocus if minimized — user intentionally hid it
+      if (popup.state !== 'minimized') {
+        await chrome.windows.update(popupWindowId, { focused: true });
+      }
+    } catch (_) {
+      // Popup was closed
+      popupWindowId = null;
+    }
+    isRefocusing = false;
+  }, 100);
+});
+
+// ── Cleanup when popup window is closed ──
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (windowId === popupWindowId) {
+    popupWindowId = null;
   }
 });
 
