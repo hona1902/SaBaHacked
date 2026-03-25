@@ -1,0 +1,57 @@
+[
+  {
+    "question": "Công cụ AI nào được mô tả là \"nhà nghiên cứu & phân tích thông tin thời gian thực\"?",
+    "options": {
+      "A": "Copilot",
+      "B": "ChatGPT",
+      "C": "NotebookLM",
+      "D": "Gemini"
+    },
+    "answer": "D",
+    "explanation": "Gemini được Google mô tả là công cụ AI có khả năng nghiên cứu và phân tích thông tin thời gian thực."
+  },
+  {
+    "question": "AI là viết tắt của cụm từ nào?",
+    "options": {
+      "A": "Automatic Intelligence",
+      "B": "Artificial Intelligence",
+      "C": "Advanced Integration",
+      "D": "Applied Informatics"
+    },
+    "answer": "B",
+    "explanation": "AI là viết tắt của Artificial Intelligence - Trí tuệ nhân tạo."
+  },
+  {
+    "question": "Ứng dụng nào sau đây KHÔNG phải là ứng dụng của AI trong ngân hàng?",
+    "options": {
+      "A": "Chatbot hỗ trợ khách hàng",
+      "B": "Phát hiện gian lận giao dịch",
+      "C": "In sổ tiết kiệm thủ công",
+      "D": "Đánh giá rủi ro tín dụng"
+    },
+    "answer": "C",
+    "explanation": "In sổ tiết kiệm thủ công là công việc truyền thống, không liên quan đến AI."
+  },
+  {
+    "question": "Machine Learning (Học máy) là gì?",
+    "options": {
+      "A": "Máy tính tự sửa chữa phần cứng",
+      "B": "Phần mềm tự cài đặt bản cập nhật",
+      "C": "Hệ thống tự học từ dữ liệu mà không cần lập trình cụ thể",
+      "D": "Robot thay thế con người hoàn toàn"
+    },
+    "answer": "C",
+    "explanation": "Machine Learning là một nhánh của AI, cho phép hệ thống tự học và cải thiện từ dữ liệu mà không cần được lập trình cụ thể."
+  },
+  {
+    "question": "Công cụ nào giúp tạo nội dung văn bản tự động dựa trên prompt?",
+    "options": {
+      "A": "Excel",
+      "B": "ChatGPT",
+      "C": "PowerPoint",
+      "D": "Outlook"
+    },
+    "answer": "B",
+    "explanation": "ChatGPT là mô hình ngôn ngữ lớn (LLM) của OpenAI, có khả năng tạo nội dung văn bản tự động dựa trên prompt người dùng nhập."
+  }
+]

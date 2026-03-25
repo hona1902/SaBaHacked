@@ -1,0 +1,988 @@
+{
+  "name": "Thi Nghiep Vu Lan II - TEST",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Process Message (n8n Function node)\n\n// Input có 2 dạng:\n// 1) Telegram bot: { message: { chat:{id}, message_id, text|photo[...] , ... } }\n// 2) Extension webhook: { headers, query, body: { question, pageUrl, options, options_raw }, ... }\n\nconst input = $json;\n\n// Case 1: Telegram (giữ nguyên logic cũ)\nif (input.message) {\n  const message = input.message;\n  const chatId = $input.first().json.headers['x-forwarded-for'];\n  const messageId = message.message_id;\n\n  if (message.text) {\n    return [{\n      json: {\n        question: message.text,\n        pageUrl: \"\",\n        options: [],\n        options_raw: [],\n        chatId,\n        messageId,\n        messageType: \"text\",\n        needOCR: false\n      }\n    }];\n  } else if (message.photo && message.photo.length > 0) {\n    const photo = message.photo[message.photo.length - 1]; // highest res\n    const fileData = $input.first().json.binary?.data || \"\";\n\n    return [{\n      json: {\n        photoFileId: photo.file_id,\n        imageData: fileData,\n        question: \"\",\n        pageUrl: \"\",\n        options: [],\n        options_raw: [],\n        chatId,\n        messageId,\n        messageType: \"image\",\n        needOCR: true\n      }\n    }];\n  } else {\n    return [{\n      json: {\n        error: \"Vui lòng gửi text hoặc hình ảnh\",\n        chatId,\n        messageId,\n        messageType: \"unsupported\"\n      }\n    }];\n  }\n}\n\n// Case 2: Webhook từ extension (payload nằm ở $json.body)\nconst body = input.body || {};\nconst question = (body.question || \"\").trim();\nconst pageUrl = body.pageUrl || \"\";\nconst options = Array.isArray(body.options) ? body.options : [];\nconst optionsRaw = Array.isArray(body.options_raw) ? body.options_raw : [];\nconst nghiepvu = body.business || \"\";\n\n// Kiểm tra needOCR: có imageData HOẶC question là \"OCR từ ảnh màn hình\" HOẶC có option dạng ảnh\nconst hasImageData = body.imageData && body.imageData.startsWith('data:image/');\nconst isOCRQuestion = question === \"OCR từ ảnh màn hình\";\nconst hasImageOptions = optionsRaw.some(o => o?.img && (o.img.src || o.img.alt));\nconst needOCR = hasImageData || isOCRQuestion || hasImageOptions;\n\n// Chuẩn hóa để các node sau dùng chung một schema\nreturn [{\n  json: {\n    question,\n    pageUrl,\n    options,\n    options_raw: optionsRaw,\n    messageType: \"webhook\",\n    needOCR,\n    nghiepvu,\n    imageData: body.imageData || \"\" // Thêm imageData để các node sau có thể dùng\n  }\n}];"
+      },
+      "id": "c4a46a98-c247-4995-8d07-2f9513f5e915",
+      "name": "Process Message",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        -1552,
+        2128
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "const geminiResponse = $input.first().json;\nconst originalData = $('Process Message').first().json;\nconst nghiepvu = $('EditHinhANh').first().json.nghiepvu;\n\nlet extractedText = '';\ntry {\n  if (geminiResponse.candidates && geminiResponse.candidates[0]) {\n    extractedText = geminiResponse.candidates[0].content.parts[0].text;\n  }\n} catch (e) {\n  extractedText = 'Không thể đọc text từ hình ảnh';\n}\n\nreturn [{\n  json: {\n    question: extractedText,\n    nghiepvu: nghiepvu,\n    chatId: originalData.chatId,\n    messageId: originalData.messageId\n  }\n}];"
+      },
+      "id": "da6cb611-3371-423f-b822-284dc9fa97b8",
+      "name": "Process OCR Result",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        -992,
+        2480
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  // ---- helpers ----\n  function getAiText(ai){\n    if (!ai || typeof ai !== 'object') return '';\n    if (typeof ai.output === 'string') return ai.output;\n    if (typeof ai.text === 'string') return ai.text;\n    if (typeof ai.response === 'string') return ai.response;\n    if (Array.isArray(ai.choices)) {\n      const c = ai.choices[0] || {};\n      return c.message?.content || c.text || '';\n    }\n    return '';\n  }\n  function ensureBreaks(s){\n    if (!s) return '';\n    s = s.replace(/\\r\\n/g, '\\n').replace(/[ \\t]+$/gm, '');\n    // options A./A)/A- -> xuống dòng\n    s = s.replace(/(?:^|\\s)([A-D])\\s*[\\.\\)\\-–:]\\s+/g, '\\n$1) ');\n    // headers\n    s = s.replace(/\\s*\\*{0,2}\\s*(Đáp án(?:\\s+đúng\\s+là)?|Answer)\\s*[:：]?\\s*/gi, '\\n\\n**Đáp án:** ');\n    s = s.replace(/\\s*\\*{0,2}\\s*(Giải thích|Reason|Explanation)\\s*[:：]?\\s*/gi, '\\n\\n**Giải thích:** ');\n    s = s.replace(/\\s*\\*{0,2}\\s*(Trích dẫn|Nguồn|Citation|Source)\\s*[:：]?\\s*/gi, '\\n\\n**Trích dẫn:** ');\n    // bullets\n    s = s.replace(/(?:^|\\n)[ \\t]*[-–•]\\s+/g, '\\n- ');\n    // ngoặc nhiều mục -> bullets (bảo thủ)\n    s = s.replace(/\\(([^()]{12,200})\\)/g, (m, inner) => {\n      const parts = inner.split(/\\s*,\\s*/);\n      if (parts.length >= 3 && parts.every(p => p.split(' ').length <= 8)) {\n        return '\\n' + parts.map(p => `- ${p}`).join('\\n');\n      }\n      return m;\n    });\n    return s.replace(/\\n{3,}/g, '\\n\\n').trim();\n  }\n\n  const ai = $json;\n  const answer = ensureBreaks(getAiText(ai));\n\n  // Lấy câu hỏi gốc\n  let originalQuestion = '(không rõ)';\n  try { const e = $('Edit Fields - OCR').first(); if (e?.json?.input) originalQuestion = e.json.input; } catch {}\n  if (originalQuestion === '(không rõ)') {\n    try { const o = $('Process OCR Result').first(); if (o?.json?.question) originalQuestion = o.json.question; } catch {}\n  }\n\n  const response = [\n    `📚 **Câu hỏi:** ${originalQuestion}`,\n    '',\n    `🤖 **Trả lời:**`,\n    answer || '(không có nội dung)',\n    '',\n    `⏰ _${new Date().toLocaleString('vi-VN')}_`\n  ].join('\\n');\n\n  return [{ json: { response } }];\n} catch (error) {\n  return [{ json: { response: `❌ Lỗi: ${error.message||error}` } }];\n}\n"
+      },
+      "id": "a92170ea-8531-471c-8e8b-df4f839a7bf2",
+      "name": "Format AI (Image)",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        640,
+        2432
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "content": "## ✅ Fixed Version - No Merge\n\n### Approach:\n- Xử lý Text và Image riêng biệt\n- Không dùng Merge node\n- 2 luồng độc lập\n\n### Env Variables:\n```\nGEMINI_API_KEY=xxx\nGOOGLE_SHEET_ID=xxx\n```",
+        "height": 344,
+        "width": 368,
+        "color": 5
+      },
+      "id": "3bc047c5-c528-4203-a30c-9528d53ff9bb",
+      "name": "📋 Setup Guide",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1120,
+        1760
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "70be781a-bc8c-4788-a404-d57db51035d6",
+              "leftValue": "={{ $json.needOCR }}",
+              "rightValue": "false",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1344,
+        2128
+      ],
+      "id": "529d5ce4-2f83-4303-92d1-20e9d5d274c3",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "AIzaSyAtJmqJ729xW0H7WuL2CTI9D_h3LRuuBXA"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [\n      {\n        \"text\": \"Hãy trích xuất toàn bộ văn bản từ hình ảnh này. Nếu là câu hỏi trắc nghiệm, giữ nguyên format câu hỏi và các đáp án A, B, C, D. Chỉ trả về text, không giải thích.\"\n      },\n      {\n        \"inline_data\": {\n          \"mime_type\": \"{{ $json.mime }}\",\n          \"data\": \"{{ $json.data }}\"\n        }\n      }\n    ]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 1000\n  }\n}",
+        "options": {}
+      },
+      "id": "bccdbe22-738b-4777-aa8b-f0fecd5f483a",
+      "name": "Gemini OCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -1168,
+        2496
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {},
+      "id": "506409cc-a570-4f86-af9f-724f11ce4687",
+      "name": "Postgres Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1,
+      "position": [
+        240,
+        2960
+      ],
+      "notesInFlow": false,
+      "credentials": {
+        "postgres": {
+          "id": "jXhbl0pbK1DFJvCd",
+          "name": "Postgres ThiNghiepVu"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.input }}",
+        "options": {
+          "systemMessage": "=Bạn là trợ lý cá nhân, người giúp trả lời các câu hỏi từ một kho tài liệu. Các tài liệu này có thể ở dạng văn bản (Txt, docs, PDF được trích xuất, v.v.) hoặc dữ liệu bảng (CSV hoặc tài liệu Excel).\n\nBạn được cung cấp các công cụ để thực hiện RAG trong bảng 'documents', tra cứu các tài liệu có sẵn trong cơ sở kiến ​​thức của bạn trong bảng 'document_metadata', trích xuất toàn bộ văn bản từ một tài liệu nhất định và truy vấn các tệp bảng bằng SQL trong bảng 'document_rows'.\n\nLuôn bắt đầu bằng cách thực hiện RAG trừ khi câu hỏi yêu cầu truy vấn SQL cho dữ liệu bảng (lấy tổng, tìm giá trị lớn nhất, những điều mà tra cứu RAG không thể thực hiện được). Nếu RAG không hữu ích, hãy xem các tài liệu có sẵn, tìm một vài tài liệu mà bạn nghĩ có thể chứa câu trả lời, sau đó phân tích chúng.\n\nLuôn báo cho người dùng biết nếu bạn không tìm thấy câu trả lời. Đừng bịa đặt điều gì đó chỉ để làm họ hài lòng. Nếu là trắc nghiệm, xác định đáp án đúng và giải thích.\nLuôn luôn phải trả lời bằng Tiếng Việt"
+        }
+      },
+      "id": "e7aa69dd-55c2-46e4-b726-929250d54612",
+      "name": "RAG AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [
+        208,
+        2544
+      ]
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Use this tool to fetch all available documents, including the table schema if the file is a CSV or Excel file.",
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "document_metadata",
+          "mode": "list",
+          "cachedResultName": "document_metadata"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.5,
+      "position": [
+        384,
+        2944
+      ],
+      "id": "0b9fe332-c69c-4410-9f3f-66748ecf9e13",
+      "name": "List Documents",
+      "credentials": {
+        "postgres": {
+          "id": "jXhbl0pbK1DFJvCd",
+          "name": "Postgres ThiNghiepVu"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Given a file ID, fetches the text from the document.",
+        "operation": "executeQuery",
+        "query": "SELECT \n    string_agg(content, ' ') as document_text\nFROM documents\n  WHERE metadata->>'file_id' = $1\nGROUP BY metadata->>'file_id';",
+        "options": {
+          "queryReplacement": "={{ $fromAI('file_id') }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.5,
+      "position": [
+        528,
+        2944
+      ],
+      "id": "90c6c84e-1e02-4521-b0f5-fe3bbc978f29",
+      "name": "Get File Contents",
+      "credentials": {
+        "postgres": {
+          "id": "jXhbl0pbK1DFJvCd",
+          "name": "Postgres ThiNghiepVu"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "=Run a SQL query - use this to query from the document_rows table once you know the file ID you are querying. dataset_id is the file_id and you are always using the row_data for filtering, which is a jsonb field that has all the keys from the file schema given in the document_metadata table.\n\nExample query:\n\nSELECT AVG((row_data->>'revenue')::numeric)\nFROM document_rows\nWHERE dataset_id = '123';\n\nExample query 2:\n\nSELECT \n    row_data->>'category' as category,\n    SUM((row_data->>'sales')::numeric) as total_sales\nFROM dataset_rows\nWHERE dataset_id = '123'\nGROUP BY row_data->>'category';",
+        "operation": "executeQuery",
+        "query": "{{ $fromAI('sql_query') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.5,
+      "position": [
+        688,
+        2944
+      ],
+      "id": "2725b462-e73d-4242-b869-757fe13062e1",
+      "name": "Query Document Rows",
+      "credentials": {
+        "postgres": {
+          "id": "jXhbl0pbK1DFJvCd",
+          "name": "Postgres ThiNghiepVu"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "documents",
+        "toolDescription": "Use RAG to perform similarity Search on documents",
+        "tableName": {
+          "__rl": true,
+          "value": "documents",
+          "mode": "list",
+          "cachedResultName": "documents"
+        },
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1,
+      "position": [
+        800,
+        2752
+      ],
+      "id": "3400a709-44fe-48f6-a127-99464ea032fa",
+      "name": "Supabase Vector Store",
+      "credentials": {
+        "supabaseApi": {
+          "id": "OLyTXzLafrn6mDJV",
+          "name": "Supabase acc ThiNghiepVu"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-custom-embed.customEmbeddings",
+      "typeVersion": 1,
+      "position": [
+        960,
+        2992
+      ],
+      "id": "dddee47b-682d-48a2-891d-71b9bbf7e1ad",
+      "name": "Custom Embeddings2",
+      "credentials": {
+        "customEmbeddingsApi": {
+          "id": "xBgwqj2n26fdtfyW",
+          "name": "Custom Embeddings hona.io.vn"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -96,
+        2800
+      ],
+      "id": "9722dcaf-d8dc-424c-988d-728a455f76c4",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YAYo6rFeiwZc9rsl",
+          "name": "Google Gemini Test 01"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ThiNghiepVu",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1776,
+        2128
+      ],
+      "id": "6f9941f6-e9f9-48fc-88ac-5142b2ca1723",
+      "name": "Webhook",
+      "webhookId": "efa3154c-2b82-4b87-ac21-1d57fa76287b"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        928,
+        1760
+      ],
+      "id": "0d354f45-5712-4840-998b-9e1107a3c4e8",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{({\n  data: $json.imageData.split(',')[1],                                  // cắt prefix\n  mime:   ($json.imageData.match(/^data:(image\\/[-\\w.+]+);base64,/)||[])[1] || 'image/png',\n  nghiepvu: $json.nghiepvu\n})}}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1344,
+        2512
+      ],
+      "id": "9754db99-7c78-405a-9c66-eae0a23155d4",
+      "name": "EditHinhANh"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://embed.hona.io.vn/api/process",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ ($json.question ?? '').toString() }}"
+            },
+            {
+              "name": "chunk_size",
+              "value": "110"
+            },
+            {
+              "name": "chunk_overlap",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "158c48de-1d46-4564-9cd7-02bd64f5adbf",
+      "name": "HTTP Query Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        2272
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  id,\n  row_data,\n  1 - (qa_embedding <=> '{{ \n    JSON.stringify(\n      $json.embedding ?? $json.data?.[0]?.embedding ?? $json.embeddings?.[0] ?? $json.vector\n    ) \n  }}'::vector(768)) as score\nfrom document_rows\nwhere qa_embedding is not null\norder by qa_embedding <=> '{{ \n  JSON.stringify(\n    $json.embedding ?? $json.data?.[0]?.embedding ?? $json.embeddings?.[0] ?? $json.vector\n  ) \n}}'::vector(768)\nlimit 1;\n",
+        "options": {}
+      },
+      "id": "29eabfca-8f60-4a00-ba89-be9911ab95d5",
+      "name": "Select Top-1 by Vector",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -592,
+        2272
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "jXhbl0pbK1DFJvCd",
+          "name": "Postgres ThiNghiepVu"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "f57e575c-f8d2-42ba-b94e-764ee9444058",
+              "leftValue": "={{ Number($json.score) }}",
+              "rightValue": 0.4,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "27cc4293-9bc7-4c69-a31a-e4ad11329df8",
+      "name": "If score ≥ 0.55?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -384,
+        2272
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5f32c935-0f1b-47d5-b034-0698b5bdd9d7",
+              "leftValue": "={{ $('If').item.json.needOCR }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -208,
+        2048
+      ],
+      "id": "de84d048-c9a2-4c50-9177-2ad1fce76acd",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== 1) Row từ Select Top-1 (đang ở $json) =====\nconst row = $json.row_data || {};\nconst Q  = row.Question || row['Câu hỏi'] || row['question'] || '';\nconst A  = row.OptionA  || row['A'] || row['Option A'] || '';\nconst B  = row.OptionB  || row['B'] || row['Option B'] || '';\nconst C  = row.OptionC  || row['C'] || row['Option C'] || '';\nconst D  = row.OptionD  || row['D'] || row['Option D'] || '';\nconst ansLetterDB = (row.Answer || row['Đáp án'] || '').toString().trim().charAt(0).toUpperCase();\nconst dbOpts = { A, B, C, D };\nconst ansTextDB = dbOpts[ansLetterDB] || '';\nconst explanation = row.Explanation || row['Giải thích'] || row['Explanation'] || '';\n\n// ===== 2) Chỉ lấy từ Process Message =====\nconst pm = ($items('Process OCR Result', 0, 0)?.[0]?.json) || {};\nlet pageOpts = [];\n\n// a) Nếu Process Message đã có mảng options\nif (Array.isArray(pm.options) && pm.options.length) {\n  pageOpts = pm.options.slice();\n} else if (Array.isArray(pm.options_raw) && pm.options_raw.length) {\n  pageOpts = pm.options_raw.map(o => (o?.text ?? o ?? ''));\n}\n\n// b) Chuẩn hoá bỏ tiền tố A)/A./A:\npageOpts = pageOpts.filter(Boolean).map(s => s.toString().trim().replace(/^[A-Da-d][)\\.:]\\s*/, ''));\n\n// c) Fallback: parse từ chuỗi người dùng gửi trong Process Message\nfunction parseOptionsFromText(text){\n  if (!text) return [];\n  // Hỗ trợ: xuống dòng, dấu ; , hoặc khoảng trắng lớn giữa các option\n  const re = /(?:^|[\\n;,]\\s*)([A-Da-d])[)\\.\\:\\-]?\\s*([\\s\\S]*?)(?=(?:^|[\\n;,]\\s*)[A-Da-d][)\\.\\:\\-]?\\s*|\\s*$)/gi;\n  let m, arr = [];\n  while ((m = re.exec(text)) !== null) {\n    const opt = (m[2] || '').toString().trim();\n    if (opt) arr.push(opt);\n  }\n  return arr;\n}\nif (!pageOpts.length) {\n  // pm.question hoặc message gốc user nhập\n  const raw = pm.question || pm.text || pm.input || '';\n  pageOpts = parseOptionsFromText(raw);\n}\n\n// ===== 3) Similarity để map theo nội dung =====\nconst letters = ['A','B','C','D','E','F','G'];\nconst norm = s => (s||'')\n  .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')\n  .toLowerCase()\n  .replace(/(?<=\\d)[\\.,](?=\\d)/g,'')   // 1.000.000 → 1000000; 1,000 → 1000\n  .replace(/[^\\p{L}\\p{N}\\s]/gu,' ')\n  .replace(/\\s+/g,' ')\n  .trim();\n\nfunction jaccard(a,b){\n  const A=new Set(norm(a).split(' ').filter(w=>w.length>1));\n  const B=new Set(norm(b).split(' ').filter(w=>w.length>1));\n  if(!A.size||!B.size) return 0;\n  let inter=0; for(const w of A) if(B.has(w)) inter++;\n  return inter/(A.size+B.size-inter);\n}\nfunction sim(a,b){\n  const u=norm(a), v=norm(b);\n  if (!u || !v) return 0;\n  if (u.includes(v) || v.includes(u)) return 0.99;\n  return jaccard(a,b);\n}\n\n// ===== 4) Map đáp án DB → chữ cái đúng theo thứ tự trên đề =====\nlet mappedIdx=-1, mappedScore=0;\nif (ansTextDB && pageOpts.length){\n  for (let i=0;i<pageOpts.length;i++){\n    const s = sim(ansTextDB, pageOpts[i]);\n    if (s > mappedScore){ mappedScore=s; mappedIdx=i; }\n  }\n}\nconst THRESH=0.55;\nconst pageLetter=(mappedIdx>=0 && mappedScore>=THRESH)?letters[mappedIdx]:ansLetterDB;\nconst pageText  =(mappedIdx>=0 && mappedScore>=THRESH)?pageOpts[mappedIdx]:ansTextDB;\n\n// ===== 5) Output =====\nconst out=[];\nif (Q) out.push(`📚 **Câu hỏi:** ${Q}`);\n\n// In options theo thứ tự trên đề nếu parse được,\n// nếu không thì fallback in OptionA..D trong DB\nif (pageOpts.length){\n  out.push('');\n  for (let i=0;i<pageOpts.length;i++) out.push(`${letters[i]}) ${pageOpts[i]}`);\n} else {\n  const list=[['A',A],['B',B],['C',C],['D',D]].filter(([,t])=>t);\n  if (list.length){ out.push(''); for (const [L,T] of list) out.push(`${L}) ${T}`); }\n}\n\nout.push('');\nout.push(`✅ **Đáp án đúng:** ${pageLetter} — ${pageText}`);\nif (pageLetter !== ansLetterDB) {\n  out.push(`_(Trong CSDL: ${ansLetterDB} — ${ansTextDB};)_`);\n}\nif (explanation) {\n  out.push('');\n  out.push(`📝 **Giải thích:** ${explanation}`);\n}\nconst sc = Math.round(((Number($json.score)||0)*100));\nout.push('');\nout.push(`📊 _Độ giống câu hỏi: ${sc}%_`);\n\nreturn [{\n  json: {\n    response: out.join('\\n'),\n    mappedLetter: pageLetter,\n    mappedScore,\n    debug: { pageOpts, ansLetterDB, ansTextDB, parsedFrom: pm.question ? 'Process Message' : 'fallback' }\n  }\n}];\n"
+      },
+      "id": "6705bb77-213e-425a-846b-d6b2e14ec682",
+      "name": "Format MCQ → response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        2080
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== 1) Row từ Select Top-1 (đang ở $json) =====\nconst row = $json.row_data || {};\nconst Q  = row.Question || row['Câu hỏi'] || row['question'] || '';\nconst A  = row.OptionA  || row['A'] || row['Option A'] || '';\nconst B  = row.OptionB  || row['B'] || row['Option B'] || '';\nconst C  = row.OptionC  || row['C'] || row['Option C'] || '';\nconst D  = row.OptionD  || row['D'] || row['Option D'] || '';\nconst ansLetterDB = (row.Answer || row['Đáp án'] || '').toString().trim().charAt(0).toUpperCase();\nconst dbOpts = { A, B, C, D };\nconst ansTextDB = dbOpts[ansLetterDB] || '';\nconst explanation = row.Explanation || row['Giải thích'] || row['Explanation'] || '';\n\n// ===== 2) Chỉ lấy từ Process Message =====\nconst pm = ($items('Process Message', 0, 0)?.[0]?.json) || {};\nlet pageOpts = [];\n\n// a) Nếu Process Message đã có mảng options\nif (Array.isArray(pm.options) && pm.options.length) {\n  pageOpts = pm.options.slice();\n} else if (Array.isArray(pm.options_raw) && pm.options_raw.length) {\n  pageOpts = pm.options_raw.map(o => (o?.text ?? o ?? ''));\n}\n\n// b) Chuẩn hoá bỏ tiền tố A)/A./A:\npageOpts = pageOpts.filter(Boolean).map(s => s.toString().trim().replace(/^[A-Da-d][)\\.:]\\s*/, ''));\n\n// c) Fallback: parse từ chuỗi người dùng gửi trong Process Message\nfunction parseOptionsFromText(text){\n  if (!text) return [];\n  // Hỗ trợ: xuống dòng, dấu ; , hoặc khoảng trắng lớn giữa các option\n  const re = /(?:^|[\\n;,]\\s*)([A-Da-d])[)\\.\\:\\-]?\\s*([\\s\\S]*?)(?=(?:^|[\\n;,]\\s*)[A-Da-d][)\\.\\:\\-]?\\s*|\\s*$)/gi;\n  let m, arr = [];\n  while ((m = re.exec(text)) !== null) {\n    const opt = (m[2] || '').toString().trim();\n    if (opt) arr.push(opt);\n  }\n  return arr;\n}\nif (!pageOpts.length) {\n  // pm.question hoặc message gốc user nhập\n  const raw = pm.question || pm.text || pm.input || '';\n  pageOpts = parseOptionsFromText(raw);\n}\n\n// ===== 3) Similarity để map theo nội dung =====\nconst letters = ['A','B','C','D','E','F','G'];\nconst norm = s => (s||'')\n  .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')\n  .toLowerCase()\n  .replace(/(?<=\\d)[\\.,](?=\\d)/g,'')   // 1.000.000 → 1000000; 1,000 → 1000\n  .replace(/[^\\p{L}\\p{N}\\s]/gu,' ')\n  .replace(/\\s+/g,' ')\n  .trim();\n\nfunction jaccard(a,b){\n  const A=new Set(norm(a).split(' ').filter(w=>w.length>1));\n  const B=new Set(norm(b).split(' ').filter(w=>w.length>1));\n  if(!A.size||!B.size) return 0;\n  let inter=0; for(const w of A) if(B.has(w)) inter++;\n  return inter/(A.size+B.size-inter);\n}\nfunction sim(a,b){\n  const u=norm(a), v=norm(b);\n  if (!u || !v) return 0;\n  if (u.includes(v) || v.includes(u)) return 0.99;\n  return jaccard(a,b);\n}\n\n// ===== 4) Map đáp án DB → chữ cái đúng theo thứ tự trên đề =====\nlet mappedIdx=-1, mappedScore=0;\nif (ansTextDB && pageOpts.length){\n  for (let i=0;i<pageOpts.length;i++){\n    const s = sim(ansTextDB, pageOpts[i]);\n    if (s > mappedScore){ mappedScore=s; mappedIdx=i; }\n  }\n}\nconst THRESH=0.55;\nconst pageLetter=(mappedIdx>=0 && mappedScore>=THRESH)?letters[mappedIdx]:ansLetterDB;\nconst pageText  =(mappedIdx>=0 && mappedScore>=THRESH)?pageOpts[mappedIdx]:ansTextDB;\n\n// ===== 5) Output =====\nconst out=[];\nif (Q) out.push(`📚 **Câu hỏi:** ${Q}`);\n\n// In options theo thứ tự trên đề nếu parse được,\n// nếu không thì fallback in OptionA..D trong DB\nif (pageOpts.length){\n  out.push('');\n  for (let i=0;i<pageOpts.length;i++) out.push(`${letters[i]}) ${pageOpts[i]}`);\n} else {\n  const list=[['A',A],['B',B],['C',C],['D',D]].filter(([,t])=>t);\n  if (list.length){ out.push(''); for (const [L,T] of list) out.push(`${L}) ${T}`); }\n}\n\nout.push('');\nout.push(`✅ **Đáp án đúng:** ${pageText}`);\nif (pageLetter !== ansLetterDB) {\n  out.push(`_(Trong CSDL: ${ansLetterDB} — ${ansTextDB}; đã quy đổi theo thứ tự trên đề)_`);\n}\nif (explanation) {\n  out.push('');\n  out.push(`📝 **Giải thích:** ${explanation}`);\n}\nconst sc = Math.round(((Number($json.score)||0)*100));\nout.push('');\nout.push(`📊 _Độ giống câu hỏi: ${sc}%_`);\n\nreturn [{\n  json: {\n    response: out.join('\\n'),\n    mappedLetter: pageLetter,\n    mappedScore,\n    debug: { pageOpts, ansLetterDB, ansTextDB, parsedFrom: pm.question ? 'Process Message' : 'fallback' }\n  }\n}];\n"
+      },
+      "id": "b62faa83-21f8-4a1f-b6ed-aa8f35ab7aaf",
+      "name": "Format MCQ → response - TEXT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        48,
+        2848
+      ],
+      "id": "4e4ed575-63df-4a02-a1b7-0dc1b57f2fb2",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "C8UQz55IXoPsNJ1I",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ac2716c0-fded-4ea1-87a0-fdf819ff885d",
+              "leftValue": "={{ $('Process Message').item.json.needOCR }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        2336
+      ],
+      "id": "88565bce-6f4e-440f-9b58-3910bfaa5217",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "13ded298-d657-4679-abd8-1e6cfebba30a",
+              "name": "input",
+              "value": "={{ $('Process OCR Result').item.json.question }}",
+              "type": "string"
+            },
+            {
+              "id": "ea728989-9576-4b8f-9d17-093a677c05bb",
+              "name": "sessionId",
+              "value": "={{ $('Webhook').item.json.headers['x-forwarded-for'] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        64,
+        2304
+      ],
+      "id": "7f99e410-6bdc-45d1-b428-1ab699b78026",
+      "name": "Edit Fields - OCR"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "13ded298-d657-4679-abd8-1e6cfebba30a",
+              "name": "input",
+              "value": "={{ $('Process Message').item.json.question }}",
+              "type": "string"
+            },
+            {
+              "id": "ea728989-9576-4b8f-9d17-093a677c05bb",
+              "name": "sessionId",
+              "value": "={{ $('Webhook').item.json.headers['x-forwarded-for'] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -16,
+        2464
+      ],
+      "id": "eda527ea-c70e-4387-ae6b-6c316a7279f9",
+      "name": "Edit Fields - TEXT"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "5491auto.site",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+            "content-length": "997",
+            "accept": "*/*",
+            "accept-encoding": "gzip, deflate, br, zstd",
+            "accept-language": "vi,vi-VN;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+            "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwZGI5N2VmYy00YzY1LTQwNjYtYjk4ZS1hODMzOWQ1ODJjMjciLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzU5OTkxNjY0fQ.q1_zotMw3UEYaYSPLncaRC6ZgRA1axosz71bGr8A7dk",
+            "content-type": "application/json",
+            "cookie": "rl_page_init_referrer=RudderEncrypt%3AU2FsdGVkX19kQWWrWHXg5WwCgI%2FlJal5guxMWFRVXAM%3D; rl_page_init_referring_domain=RudderEncrypt%3AU2FsdGVkX1%2B2a0eRxtWFxtvmyZ40DWWkOLm7mJEYD7M%3D; rl_anonymous_id=RudderEncrypt%3AU2FsdGVkX19RWaANtWGDQqEKwu71a6SDdUiq2OGs8r0YfJxFUgRNdNxrD881AidOjOFcgfklb8OIXfvfEb1i3g%3D%3D; rl_user_id=RudderEncrypt%3AU2FsdGVkX187sDqWnckJ39ravoigUTWGFvhWlqkYWIXeSAwovhb1h6fkr%2ByZPUjhZQXP3qdnby09mL8FS2bmwKRCS5tJNu4E5F5xphKm5tjNQkQ6V61sWbgii1ygKvh8iALIke3bFKsNxviP5QnnjMZp8%2B5xVXHjMmESMWIXtBM%3D; rl_trait=RudderEncrypt%3AU2FsdGVkX1%2FUfhAmLDQ69idStrL8dchmfZkRQS4Tu2Xe3m1lauW7qrjB2sSpwZDm9igta5S4TVeSKDOrvx2Ai5j0ureoTp9LJouwf4xHS7qR7iV6PNtJNfn775WR8lg6Z4xdDiRKx1h5QhnzpyhrDw%3D%3D; ph_phc_4URIAm1uYfJO7j8kWSe0J8lc8IqnstRLS7Jx8NcakHo_posthog=%7B%22distinct_id%22%3A%220ca5533a1a3cc823fd3be054d0d7578cd7bdb324ee7393a7271ebd0d1c34b0aa%230db97efc-4c65-4066-b98e-a8339d582c27%22%2C%22%24sesid%22%3A%5B1760613971108%2C%220199ecbc-5521-7265-81e6-a9fea3ec91c8%22%2C1760613389600%5D%2C%22%24epp%22%3Atrue%2C%22%24initial_person_info%22%3A%7B%22r%22%3A%22%24direct%22%2C%22u%22%3A%22https%3A%2F%2F5491auto.site%2Fsetup%22%7D%7D; rl_session=RudderEncrypt%3AU2FsdGVkX19u3GGpR3PJCk%2FS7AzI9Xc%2FeO5ew6g05oqAl7gtLaQhQSo28LE9JZL1a50NMUbdCe4AzNZGdj6aB4u47ro00SHqzMpi6JfIGHzJOHKaXPfd0nCd6w06gnNbrYzlOlxvFCm3n0%2FRofY5yw%3D%3D",
+            "origin": "chrome-extension://nnekffgnlncgjkmadapineclebklglbn",
+            "priority": "u=1, i",
+            "sec-ch-ua": "\"Google Chrome\";v=\"141\", \"Not?A_Brand\";v=\"8\", \"Chromium\";v=\"141\"",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "none",
+            "sec-fetch-storage-access": "active",
+            "via": "2.0 Caddy",
+            "x-forwarded-for": "113.180.211.10",
+            "x-forwarded-host": "5491auto.site",
+            "x-forwarded-proto": "https"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "question": "công cụ ai nào được mô tả là \"nhà nghiên cứu & phân tích thông tin thời gian thực\"?",
+            "pageUrl": "https://elearning.agribank.com.vn/Saba/Web_wdk/Cloud/content/players/ContentServerDispatcher.rdf?subscriptionId=ctnsr000000006779384&contextId=ctctx000000002538808&title=AI%20n%C3%A2ng%20cao%20hi%E1%BB%87u%20su%E1%BA%A5t%20c%C3%B4ng%20vi%E1%BB%87c%20d%C3%A0nh%20cho%20qu%E1%BA%A3n%20l%C3%BD%20c%E1%BA%A5p%20ph%C3%B2ng%20%282025%29&registrationId=regdw000000000980508",
+            "options": [
+              "copilot",
+              "chatgpt",
+              "notebooklm",
+              "gemini"
+            ],
+            "options_raw": [
+              {
+                "text": "copilot",
+                "path": "div#qresp.6.0 > div:nth-of-type(2) > label:nth-of-type(1)",
+                "img": null
+              },
+              {
+                "text": "chatgpt",
+                "path": "div#qresp.6.1 > div:nth-of-type(2) > label:nth-of-type(1)",
+                "img": null
+              },
+              {
+                "text": "notebooklm",
+                "path": "div#qresp.6.2 > div:nth-of-type(2) > label:nth-of-type(1)",
+                "img": null
+              },
+              {
+                "text": "gemini",
+                "path": "div#qresp.6.3 > div:nth-of-type(2) > label:nth-of-type(1)",
+                "img": null
+              }
+            ],
+            "business": "Tín dụng cá nhân"
+          },
+          "webhookUrl": "https://5491auto.site/webhook/ThiNghiepVu",
+          "executionMode": "production"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Process Message": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process OCR Result": {
+      "main": [
+        [
+          {
+            "node": "HTTP Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format AI (Image)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "EditHinhANh",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini OCR": {
+      "main": [
+        [
+          {
+            "node": "Process OCR Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "RAG AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Format AI (Image)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Documents": {
+      "ai_tool": [
+        [
+          {
+            "node": "RAG AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Contents": {
+      "ai_tool": [
+        [
+          {
+            "node": "RAG AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Document Rows": {
+      "ai_tool": [
+        [
+          {
+            "node": "RAG AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Vector Store": {
+      "ai_tool": [
+        [
+          {
+            "node": "RAG AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Custom Embeddings2": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Supabase Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "RAG AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Process Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EditHinhANh": {
+      "main": [
+        [
+          {
+            "node": "Gemini OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "Select Top-1 by Vector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Top-1 by Vector": {
+      "main": [
+        [
+          {
+            "node": "If score ≥ 0.55?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If score ≥ 0.55?": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Format MCQ → response - TEXT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format MCQ → response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format MCQ → response - TEXT": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format MCQ → response1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields - OCR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields - TEXT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields - OCR": {
+      "main": [
+        [
+          {
+            "node": "RAG AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields - TEXT": {
+      "main": [
+        [
+          {
+            "node": "RAG AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f35c3770-a159-4bdd-94f2-c6294a4584fb",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0ca5533a1a3cc823fd3be054d0d7578cd7bdb324ee7393a7271ebd0d1c34b0aa"
+  },
+  "id": "H71C3d7sc1ZMwNTN",
+  "tags": []
+}

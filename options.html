@@ -1,0 +1,500 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Saba Hacked — Cài đặt</title>
+  <link rel="icon" type="image/png" href="Logo-HNA.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ===== Design Tokens (from popup.css) ===== */
+    :root {
+      --primary: #AE1C3F;
+      --primary-hover: #8E1533;
+      --primary-light: #FBE8EC;
+      --primary-glow: rgba(174, 28, 63, 0.15);
+      --bg: #FFFFFF;
+      --surface: #F8F9FA;
+      --border: #E5E7EB;
+      --border-focus: #AE1C3F;
+      --text: #1F2937;
+      --text-muted: #6B7280;
+      --text-light: #9CA3AF;
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+      --shadow-md: 0 2px 8px rgba(0,0,0,0.08);
+      --transition: 150ms ease;
+      --green: #16a34a;
+      --green-light: #dcfce7;
+      --red: #dc2626;
+      --red-light: #fef2f2;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text);
+      background: var(--surface);
+      min-height: 100vh;
+    }
+
+    /* ===== Header ===== */
+    .settings-header {
+      background: var(--primary);
+      color: #fff;
+      padding: 16px 24px;
+    }
+    .settings-header h1 {
+      font-size: 18px;
+      font-weight: 700;
+      margin: 0;
+    }
+    .settings-header p {
+      font-size: 12px;
+      opacity: 0.8;
+      margin-top: 2px;
+    }
+
+    /* ===== Tab Bar ===== */
+    .tab-bar {
+      display: flex;
+      background: var(--bg);
+      border-bottom: 2px solid var(--border);
+      padding: 0 24px;
+    }
+    .tab-btn {
+      padding: 12px 20px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: none;
+      border: none;
+      border-bottom: 3px solid transparent;
+      cursor: pointer;
+      transition: all var(--transition);
+      margin-bottom: -2px;
+    }
+    .tab-btn:hover {
+      color: var(--primary);
+      background: var(--primary-light);
+    }
+    .tab-btn.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+
+    /* ===== Tab Panels ===== */
+    .tab-panel {
+      display: none;
+      padding: 20px 24px;
+      max-width: 720px;
+    }
+    .tab-panel.active {
+      display: block;
+    }
+
+    /* ===== Form Elements ===== */
+    .field {
+      margin-bottom: 16px;
+    }
+    .field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .field input, .field textarea, .field select {
+      width: 100%;
+      padding: 9px 12px;
+      font-family: inherit;
+      font-size: 13px;
+      color: var(--text);
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      outline: none;
+      transition: border var(--transition), box-shadow var(--transition);
+    }
+    .field input:focus, .field textarea:focus, .field select:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--primary-glow);
+    }
+    .field small {
+      display: block;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--text-light);
+    }
+
+    /* ===== Buttons ===== */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 9px 16px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid transparent;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+    .btn-primary:hover {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+    }
+    .btn-outline {
+      background: var(--bg);
+      color: var(--primary);
+      border-color: var(--primary);
+    }
+    .btn-outline:hover {
+      background: var(--primary-light);
+    }
+    .btn-sm {
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+    .btn-danger {
+      background: var(--red);
+      color: #fff;
+      border-color: var(--red);
+    }
+    .btn-danger:hover {
+      opacity: 0.85;
+    }
+    .btn-success {
+      background: var(--green);
+      color: #fff;
+      border-color: var(--green);
+    }
+    .btn-success:hover {
+      opacity: 0.85;
+    }
+
+    /* ===== Status Toast ===== */
+    .toast {
+      display: inline-block;
+      margin-left: 12px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--green);
+      opacity: 0;
+      transition: opacity 300ms;
+    }
+    .toast.show { opacity: 1; }
+
+    /* ===== Bank List ===== */
+    .bank-list {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .bank-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      transition: background var(--transition);
+    }
+    .bank-item:last-child { border-bottom: none; }
+    .bank-item:hover { background: var(--surface); }
+    .bank-item .bank-name {
+      flex: 1;
+      font-weight: 500;
+      font-size: 13px;
+    }
+    .bank-item .bank-count {
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--surface);
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+    .bank-item .bank-type {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .bank-type.bundled {
+      color: #0369a1;
+      background: #e0f2fe;
+    }
+    .bank-type.custom {
+      color: var(--green);
+      background: var(--green-light);
+    }
+    .bank-empty {
+      padding: 20px;
+      text-align: center;
+      color: var(--text-light);
+      font-size: 13px;
+    }
+
+    /* ===== Create Bank / Add Question ===== */
+    .card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .card h3 {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: var(--text);
+    }
+    .row {
+      display: flex;
+      gap: 12px;
+    }
+    .row > * { flex: 1; }
+
+    /* ===== Upload Area ===== */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all var(--transition);
+      background: var(--surface);
+    }
+    .upload-zone:hover {
+      border-color: var(--primary);
+      background: var(--primary-light);
+    }
+    .upload-zone.dragover {
+      border-color: var(--primary);
+      background: var(--primary-light);
+    }
+    .upload-zone p {
+      margin: 4px 0;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .upload-zone .icon {
+      font-size: 28px;
+      margin-bottom: 4px;
+    }
+    .upload-preview {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: var(--green-light);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      color: var(--green);
+      font-weight: 600;
+    }
+    .upload-preview.error {
+      background: var(--red-light);
+      color: var(--red);
+    }
+
+    /* ===== Import Area ===== */
+    .import-section {
+      margin-top: 0;
+    }
+    .import-section summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .import-section textarea {
+      margin-top: 8px;
+      width: 100%;
+      height: 100px;
+      padding: 8px 10px;
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      resize: vertical;
+    }
+
+    .hidden { display: none !important; }
+
+    /* ===== Password Toggle ===== */
+    .field-with-toggle {
+      position: relative;
+    }
+    .field-with-toggle input {
+      padding-right: 36px;
+    }
+    .toggle-visibility {
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      color: var(--text-muted);
+      padding: 2px 4px;
+      line-height: 1;
+    }
+    .toggle-visibility:hover {
+      color: var(--primary);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="settings-header">
+    <h1>⚙️ Saba Hacked — Cài đặt</h1>
+    <p>v1.1.0 — HNA Soft</p>
+  </div>
+
+  <!-- Tab Bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="general">🔧 Cài đặt chung</button>
+    <button class="tab-btn" data-tab="bank">📚 Ngân hàng câu hỏi</button>
+  </div>
+
+  <!-- ===== Tab 1: General Settings ===== -->
+  <div id="tab-general" class="tab-panel active">
+
+    <div class="field">
+      <label>Host Patterns (regex, mỗi dòng 1 mẫu)</label>
+      <textarea id="hostPatterns" rows="4" placeholder="^https://(www\.)?your-elearning\.com/"></textarea>
+      <small>Extension chỉ highlight trên các trang khớp mẫu này.</small>
+    </div>
+
+    <!-- Open Notebook Settings -->
+    <div style="margin-top:16px; padding-top:16px; border-top:1.5px solid var(--border);">
+      <div style="font-size:13px; font-weight:700; color:var(--primary); margin-bottom:12px;">📓 Open Notebook (Hỏi AI)</div>
+
+      <div class="field">
+        <label>Notebook API URL</label>
+        <div class="field-with-toggle">
+          <input id="notebookApiUrl" type="password" placeholder="https://sotay5491.io.vn/api" />
+          <button type="button" class="toggle-visibility" data-target="notebookApiUrl" title="Hiện/Ẩn">👁️</button>
+        </div>
+        <small>Base URL của Open Notebook API (không có dấu / cuối).</small>
+      </div>
+
+      <div class="field">
+        <label>Notebook ID</label>
+        <div class="field-with-toggle">
+          <input id="notebookId" type="password" placeholder="notebook:orsrbbj4tvvngnpg0o1d" />
+          <button type="button" class="toggle-visibility" data-target="notebookId" title="Hiện/Ẩn">👁️</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Notebook API Password</label>
+        <div class="field-with-toggle">
+          <input id="notebookApiPassword" type="password" placeholder="Mật khẩu API" />
+          <button type="button" class="toggle-visibility" data-target="notebookApiPassword" title="Hiện/Ẩn">👁️</button>
+        </div>
+      </div>
+    </div>
+
+    <button id="saveGeneral" class="btn btn-primary">💾 Lưu cài đặt</button>
+    <span id="statusGeneral" class="toast"></span>
+  </div>
+
+  <!-- ===== Tab 2: Question Bank Manager ===== -->
+  <div id="tab-bank" class="tab-panel">
+
+    <!-- Bank List -->
+    <div class="card">
+      <h3>📋 Danh sách ngân hàng câu hỏi</h3>
+      <div id="bankList" class="bank-list">
+        <div class="bank-empty">Đang tải...</div>
+      </div>
+    </div>
+
+    <!-- Create New Bank -->
+    <div class="card">
+      <h3>➕ Tạo ngân hàng mới</h3>
+      <div class="row">
+        <div class="field">
+          <label>Tên file</label>
+          <input id="newBankName" placeholder="vd: nghiep-vu-tin-dung" />
+          <small>Tự động thêm tiền tố <code>data/</code> và hậu tố <code>.json</code></small>
+        </div>
+      </div>
+      <button id="createBank" class="btn btn-success btn-sm">✅ Tạo ngân hàng</button>
+      <span id="statusBank" class="toast"></span>
+    </div>
+
+    <!-- Upload Excel -->
+    <div class="card">
+      <h3>📤 Upload Excel</h3>
+
+      <div class="field">
+        <label>Chọn ngân hàng để import vào</label>
+        <select id="targetBank">
+          <option value="">-- Chọn --</option>
+        </select>
+      </div>
+
+      <div class="upload-zone" id="uploadZone">
+        <div class="icon">📄</div>
+        <p><strong>Click hoặc kéo thả file Excel vào đây</strong></p>
+        <p>Hỗ trợ .xlsx, .xls</p>
+        <input type="file" id="excelFile" accept=".xlsx,.xls" style="display:none" />
+      </div>
+
+      <div id="excelPreview" class="upload-preview" style="display:none"></div>
+
+      <div style="margin-top:12px; display:flex; gap:8px; align-items:center;">
+        <button id="excelImportBtn" class="btn btn-success btn-sm" disabled>✅ Import vào ngân hàng</button>
+        <span id="statusExcel" class="toast"></span>
+      </div>
+
+      <small style="display:block;margin-top:8px;color:var(--text-light);font-size:11px;">
+        📋 Format Excel: Cột 1=Câu hỏi, Cột 2=A, Cột 3=B, Cột 4=C, Cột 5=D, Cột 6=Đáp án, Cột 7=Giải thích (tuỳ chọn). Dòng đầu tiên là header (bỏ qua).<br>
+        <a href="#" id="downloadTemplate" style="color:var(--primary);font-weight:600;text-decoration:none;">📥 Tải file mẫu Excel</a>
+      </small>
+    </div>
+
+    <!-- Import JSON -->
+    <div class="card">
+      <details class="import-section">
+        <summary>📥 Import JSON hàng loạt</summary>
+        <div class="field" style="margin-top:10px;">
+          <label>Chọn ngân hàng</label>
+          <select id="targetBankJson">
+            <option value="">-- Chọn --</option>
+          </select>
+        </div>
+        <textarea id="importJson" placeholder='Paste mảng JSON câu hỏi, vd: [{"question":"...","options":{"A":"...","B":"...","C":"...","D":"..."},"answer":"A"}]'></textarea>
+        <button id="importBtn" class="btn btn-outline btn-sm" style="margin-top:8px;">Import</button>
+        <span id="statusImport" class="toast"></span>
+      </details>
+    </div>
+
+  </div>
+
+  <script src="lib/xlsx.full.min.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

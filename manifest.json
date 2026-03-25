@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "Saba Hacked Version 1.1.0",
+  "version": "1.1.0",
+  "description": "Tra cứu đáp án, gợi ý phương án kèm trích dẫn.",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "scripting",
+    "storage",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "icons": {
+    "16": "Logo-HNA.png",
+    "48": "Logo-HNA.png",
+    "128": "Logo-HNA.png"
+  },
+  "action": {
+    "default_title": "Saba Hacked",
+    "default_icon": {
+      "16": "Logo-HNA.png",
+      "48": "Logo-HNA.png"
+    }
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["data/*.json", "config.json"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "commands": {
+    "toggle-highlight": {
+      "description": "Toggle highlight of suggested option"
+    }
+  }
+}
