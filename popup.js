@@ -2,6 +2,44 @@ let pageOptions = []; // {text, path}
 let selectedTabId = null;
 let selectedBiz = "";
 let _skipLocalMatch = false; // flag to bypass local matching on force AI ask
+let _licenseValid = false; // cached license status for popup session
+
+// ── License Status Check on Popup Load ──
+(async function checkLicenseOnLoad() {
+  const badge = document.getElementById('licenseBadge');
+  const aiBtn = document.getElementById('askAI');
+  try {
+    const result = await LicenseManager.checkLicense();
+    _licenseValid = result.valid;
+    if (result.valid) {
+      if (badge) {
+        badge.style.display = 'block';
+        badge.style.background = '#DCFCE7';
+        badge.style.color = '#166534';
+        badge.textContent = '✅ Bản quyền hợp lệ';
+      }
+      if (aiBtn) aiBtn.disabled = false;
+    } else {
+      if (badge) {
+        badge.style.display = 'block';
+        badge.style.background = '#FEF2F2';
+        badge.style.color = '#991B1B';
+        badge.textContent = '🔒 Chưa kích hoạt bản quyền — Hỏi AI bị khóa';
+      }
+      if (aiBtn) {
+        aiBtn.disabled = true;
+        aiBtn.title = 'Vui lòng kích hoạt bản quyền trong Cài đặt để sử dụng tính năng này';
+      }
+    }
+  } catch (_) {
+    if (badge) {
+      badge.style.display = 'block';
+      badge.style.background = '#FEF9C3';
+      badge.style.color = '#854D0E';
+      badge.textContent = '⚠️ Không thể kiểm tra bản quyền';
+    }
+  }
+})();
 
 document.getElementById('settings').addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
@@ -445,10 +483,15 @@ document.getElementById('ask').addEventListener('click', async () => {
 
   const cfg = await chrome.storage.sync.get({
     hostPatterns: "",
-    localBankFiles: "data/cong-nghe-so.json",
+    localBankFiles: "",
+    bankFilesInitialized: false,
     sessionMode: cfgDefaults.sessionMode || "reuse",
     selectedNotebookId: ""
   });
+  // If user never modified bank list, use default bundled bank
+  if (!cfg.bankFilesInitialized && !cfg.localBankFiles) {
+    cfg.localBankFiles = "data/cong-nghe-so.json";
+  }
   cfg.notebookApiUrl = cfgDefaults.notebookApiUrl || "";
   cfg.notebookApiPassword = cfgDefaults.notebookApiPassword || "";
 
@@ -524,6 +567,21 @@ document.getElementById('ask').addEventListener('click', async () => {
     }
   } // end if(!skipLocal)
 
+  // ── LICENSE CHECK before AI ──
+  if (!_licenseValid) {
+    try {
+      const lr = await LicenseManager.checkLicense();
+      _licenseValid = lr.valid;
+    } catch (_) {}
+  }
+  if (!_licenseValid) {
+    document.getElementById('results').innerHTML = `<div style="padding:12px; background:#FEF2F2; border-radius:8px; border-left:4px solid #EF4444;">
+      <div style="font-weight:600; color:#991B1B; margin-bottom:6px;">🔒 Tính năng Hỏi AI yêu cầu bản quyền</div>
+      <div style="color:#555; font-size:13px;">Vui lòng vào <b>Cài đặt</b> → nhập License Key → nhấn <b>Kích hoạt</b> để sử dụng.</div>
+    </div>`;
+    return;
+  }
+
   // ── OPEN NOTEBOOK API ──
   if (!cfg.notebookApiUrl || !cfg.notebookId) {
     document.getElementById('results').innerHTML = `<div style="color:#dc2626;">❌ Chưa cấu hình Notebook trong Cài đặt. Vui lòng vào Cài đặt, chọn Notebook và nhấn Lưu.</div>`;
@@ -546,7 +604,21 @@ document.getElementById('ask').addEventListener('click', async () => {
 });
 
 // ── "Hỏi AI" button — skip local matching, use Open Notebook API ──
-document.getElementById('askAI').addEventListener('click', () => {
+document.getElementById('askAI').addEventListener('click', async () => {
+  // Pre-check license before triggering AI flow
+  if (!_licenseValid) {
+    try {
+      const lr = await LicenseManager.checkLicense();
+      _licenseValid = lr.valid;
+    } catch (_) {}
+  }
+  if (!_licenseValid) {
+    document.getElementById('results').innerHTML = `<div style="padding:12px; background:#FEF2F2; border-radius:8px; border-left:4px solid #EF4444;">
+      <div style="font-weight:600; color:#991B1B; margin-bottom:6px;">🔒 Tính năng Hỏi AI yêu cầu bản quyền</div>
+      <div style="color:#555; font-size:13px;">Vui lòng vào <b>Cài đặt</b> → nhập License Key → nhấn <b>Kích hoạt</b> để sử dụng.</div>
+    </div>`;
+    return;
+  }
   _skipLocalMatch = true;
   document.getElementById('ask').click();
 });
@@ -559,17 +631,20 @@ function renderLocalSearching() {
 
 function renderNoLocalMatch() {
   const el = document.getElementById('results');
+  const aiButtonHtml = _licenseValid
+    ? `<button id="noMatchAskAI" class="btn btn-ai" style="width:100%; font-size:13px;">✨ Hỏi AI</button>`
+    : `<div style="color:#991B1B; font-size:12px;">🔒 Hỏi AI yêu cầu bản quyền — vào Cài đặt để kích hoạt</div>`;
   el.innerHTML = `<div style="padding:12px; background:#FFF3E0; border-radius:8px; border-left:4px solid #FF9800; text-align:center;">
     <div style="font-weight:600; color:#E65100; margin-bottom:8px;">⚠️ Không có câu hỏi trùng khớp trong bộ đề cục bộ</div>
     <div style="color:#555; font-size:12px; margin-bottom:10px;">Bạn có thể thử hỏi AI để tìm đáp án</div>
-    <button id="noMatchAskAI" class="btn btn-ai" style="width:100%; font-size:13px;">
-      ✨ Hỏi AI
-    </button>
+    ${aiButtonHtml}
   </div>`;
-  document.getElementById('noMatchAskAI')?.addEventListener('click', () => {
-    _skipLocalMatch = true;
-    document.getElementById('ask').click();
-  });
+  if (_licenseValid) {
+    document.getElementById('noMatchAskAI')?.addEventListener('click', () => {
+      _skipLocalMatch = true;
+      document.getElementById('ask').click();
+    });
+  }
 }
 
 function renderLocalResult(result) {
@@ -651,15 +726,21 @@ function renderLocalResult(result) {
   }
 
   // Fallback button to force AI
-  html += `<button id="forceAskAI" class="btn btn-outline" style="width:100%; margin-top:4px; font-size:12px;">Không khớp? ✨ Hỏi AI ▶</button>`;
+  if (_licenseValid) {
+    html += `<button id="forceAskAI" class="btn btn-outline" style="width:100%; margin-top:4px; font-size:12px;">Không khớp? ✨ Hỏi AI ▶</button>`;
+  } else {
+    html += `<div style="text-align:center; margin-top:4px; font-size:11px; color:#991B1B;">🔒 Hỏi AI yêu cầu bản quyền</div>`;
+  }
 
   el.innerHTML = html;
 
   // Bind fallback button
-  document.getElementById('forceAskAI')?.addEventListener('click', () => {
-    _skipLocalMatch = true;
-    document.getElementById('ask').click();
-  });
+  if (_licenseValid) {
+    document.getElementById('forceAskAI')?.addEventListener('click', () => {
+      _skipLocalMatch = true;
+      document.getElementById('ask').click();
+    });
+  }
 }
 
 function escapeHtml(s) { return s.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[m])); }

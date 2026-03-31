@@ -571,7 +571,7 @@
   <!-- Header -->
   <div class="settings-header">
     <h1>⚙️ Saba Hacked — Cài đặt</h1>
-    <p>v1.1.0 — HNA Soft</p>
+    <p>v1.2.0 — HNA Soft</p>
   </div>
 
   <!-- Tab Bar -->
@@ -583,10 +583,40 @@
   <!-- ===== Tab 1: General Settings ===== -->
   <div id="tab-general" class="tab-panel active">
 
-    <div class="field">
+    <div class="field" style="display: none;">
       <label>Host Patterns (regex, mỗi dòng 1 mẫu)</label>
       <textarea id="hostPatterns" rows="4" placeholder="^https://(www\.)?your-elearning\.com/"></textarea>
       <small>Extension chỉ highlight trên các trang khớp mẫu này.</small>
+    </div>
+
+    <!-- License Key Section -->
+    <div style="margin-top:16px; padding-top:16px; border-top:1.5px solid var(--border);">
+      <div style="font-size:13px; font-weight:700; color:var(--primary); margin-bottom:12px;">🔑 Bản quyền sử dụng AI</div>
+
+      <div class="field">
+        <label>Mã máy</label>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input id="machineCode" type="text" readonly style="font-family:monospace; font-weight:700; letter-spacing:2px; background:#f1f5f9; cursor:default;" />
+          <button id="copyMachineCode" class="btn btn-sm" type="button" title="Copy mã máy">📋</button>
+        </div>
+        <small>Gửi mã này cho admin để nhận key bản quyền.</small>
+      </div>
+
+      <div class="field">
+        <label>License Key</label>
+        <div class="field-with-toggle">
+          <input id="licenseKey" type="password" placeholder="Nhập key bản quyền..." autocomplete="off" />
+          <button class="toggle-visibility" type="button" data-target="licenseKey">👁️</button>
+        </div>
+        <small>Nhập key bản quyền được cấp để sử dụng tính năng Hỏi AI.</small>
+      </div>
+
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
+        <button id="activateLicense" class="btn btn-success btn-sm">🔑 Kích hoạt</button>
+        <span id="statusLicense" class="toast"></span>
+      </div>
+
+      <div id="licenseStatus" style="padding:8px 12px; border-radius:var(--radius-sm); font-size:13px; font-weight:500; display:none;"></div>
     </div>
 
     <!-- ChatBot Settings -->
@@ -695,6 +725,7 @@
   </div>
 
   <script src="lib/xlsx.full.min.js"></script>
+  <script src="license.js"></script>
   <script src="options.js"></script>
 </body>
 

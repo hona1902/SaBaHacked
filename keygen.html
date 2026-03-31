@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SabaHacked — Keygen Admin Tool</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 32px;
+      width: 420px;
+      box-shadow: 0 25px 50px rgba(0,0,0,0.4);
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: #f8fafc;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 6px;
+    }
+    input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1.5px solid #475569;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #f1f5f9;
+      font-family: 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus { border-color: #3b82f6; }
+    input::placeholder {
+      letter-spacing: 0;
+      font-weight: 400;
+      text-transform: none;
+      color: #64748b;
+    }
+    .error {
+      color: #f87171;
+      font-size: 12px;
+      margin-top: 4px;
+      min-height: 18px;
+    }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: white;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 16px;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn:active { transform: scale(0.98); }
+    .result {
+      margin-top: 20px;
+      padding: 16px;
+      background: #064e3b;
+      border: 1.5px solid #059669;
+      border-radius: 10px;
+      display: none;
+    }
+    .result.show { display: block; }
+    .result-label {
+      font-size: 12px;
+      color: #6ee7b7;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .result-key {
+      font-family: 'Fira Code', monospace;
+      font-size: 22px;
+      font-weight: 700;
+      color: #ecfdf5;
+      letter-spacing: 4px;
+      word-break: break-all;
+      cursor: pointer;
+    }
+    .result-key:hover { color: #a7f3d0; }
+    .copied {
+      font-size: 12px;
+      color: #6ee7b7;
+      margin-top: 6px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .copied.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🔑 SabaHacked Keygen</h1>
+    <p class="subtitle">Nhập mã máy của người dùng để sinh license key</p>
+
+    <label for="machineCodeInput">Mã máy (8 ký tự hex)</label>
+    <input id="machineCodeInput" type="text" maxlength="8" placeholder="VD: A1B2C3D4" autofocus />
+    <div id="errorMsg" class="error"></div>
+
+    <button class="btn" id="generateBtn">⚡ Tạo Key</button>
+
+    <div id="resultBox" class="result">
+      <div class="result-label">LICENSE KEY (click để copy)</div>
+      <div id="resultKey" class="result-key"></div>
+      <div id="copiedMsg" class="copied">📋 Đã copy!</div>
+    </div>
+  </div>
+
+  <script>
+    // Same secret as license.js — MUST match exactly
+    const SECRET_KEY = 'SaBaHacked@2025!SecretKey#HNA';
+
+    const HEX_REGEX = /^[0-9A-Fa-f]{8}$/;
+
+    async function generateLicenseKey(machineCode) {
+      const encoder = new TextEncoder();
+      const keyData = encoder.encode(SECRET_KEY);
+      const msgData = encoder.encode(machineCode.toUpperCase());
+
+      const cryptoKey = await crypto.subtle.importKey(
+        'raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+      );
+
+      const sigBuffer = await crypto.subtle.sign('HMAC', cryptoKey, msgData);
+      const sigArray = Array.from(new Uint8Array(sigBuffer));
+      const fullHex = sigArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      return fullHex.substring(0, 16).toUpperCase();
+    }
+
+    const input = document.getElementById('machineCodeInput');
+    const errorMsg = document.getElementById('errorMsg');
+    const resultBox = document.getElementById('resultBox');
+    const resultKey = document.getElementById('resultKey');
+    const copiedMsg = document.getElementById('copiedMsg');
+
+    document.getElementById('generateBtn').addEventListener('click', async () => {
+      const code = input.value.trim();
+      errorMsg.textContent = '';
+      resultBox.classList.remove('show');
+
+      if (!code) {
+        errorMsg.textContent = 'Vui lòng nhập mã máy!';
+        return;
+      }
+      if (!HEX_REGEX.test(code)) {
+        errorMsg.textContent = 'Mã máy phải đúng 8 ký tự hex (0-9, A-F)';
+        return;
+      }
+
+      const key = await generateLicenseKey(code);
+      resultKey.textContent = key;
+      resultBox.classList.add('show');
+    });
+
+    // Click to copy
+    resultKey.addEventListener('click', () => {
+      navigator.clipboard.writeText(resultKey.textContent).then(() => {
+        copiedMsg.classList.add('show');
+        setTimeout(() => copiedMsg.classList.remove('show'), 2000);
+      });
+    });
+
+    // Auto-uppercase input
+    input.addEventListener('input', () => {
+      input.value = input.value.toUpperCase().replace(/[^0-9A-F]/g, '');
+    });
+
+    // Enter key trigger
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('generateBtn').click();
+    });
+  </script>
+</body>
+</html>

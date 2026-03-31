@@ -100,13 +100,98 @@ document.querySelectorAll('.toggle-visibility').forEach(btn => {
   });
 });
 
+// ── License Key Activation (Offline) ──
+(async function initLicenseUI() {
+  // Populate machine code
+  try {
+    const machineCode = await LicenseManager.getMachineCode();
+    const mcInput = document.getElementById('machineCode');
+    if (mcInput) mcInput.value = machineCode;
+  } catch (_) {}
+
+  // Load saved key
+  const { licenseKey } = await chrome.storage.sync.get({ licenseKey: '' });
+  const keyInput = document.getElementById('licenseKey');
+  if (keyInput && licenseKey) keyInput.value = licenseKey;
+
+  // Auto-check status on page load
+  await updateLicenseStatusDisplay();
+})();
+
+// Copy machine code to clipboard
+document.getElementById('copyMachineCode')?.addEventListener('click', () => {
+  const mc = document.getElementById('machineCode');
+  if (!mc?.value) return;
+  navigator.clipboard.writeText(mc.value).then(() => {
+    showToast('statusLicense', '📋 Đã copy mã máy!');
+  });
+});
+
+async function updateLicenseStatusDisplay() {
+  const statusEl = document.getElementById('licenseStatus');
+  if (!statusEl) return;
+  try {
+    const result = await LicenseManager.checkLicense();
+    if (result.valid) {
+      statusEl.style.display = 'block';
+      statusEl.style.background = '#DCFCE7';
+      statusEl.style.color = '#166534';
+      statusEl.textContent = '✅ Bản quyền hợp lệ — tính năng Hỏi AI đã được kích hoạt';
+    } else {
+      statusEl.style.display = 'block';
+      statusEl.style.background = '#FEF2F2';
+      statusEl.style.color = '#991B1B';
+      statusEl.textContent = '❌ Chưa kích hoạt hoặc key không hợp lệ';
+    }
+  } catch (_) {
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#FEF9C3';
+    statusEl.style.color = '#854D0E';
+    statusEl.textContent = '⚠️ Không thể kiểm tra bản quyền';
+  }
+}
+
+document.getElementById('activateLicense').addEventListener('click', async () => {
+  const keyInput = document.getElementById('licenseKey');
+  const key = (keyInput?.value || '').trim();
+  if (!key) return showToast('statusLicense', '❌ Vui lòng nhập key!', true);
+
+  showToast('statusLicense', '⏳ Đang kiểm tra...');
+
+  try {
+    // Save key
+    await LicenseManager.saveKey(key);
+
+    // Verify offline
+    const valid = await LicenseManager.verifyOffline(key);
+    if (valid) {
+      showToast('statusLicense', '✅ Kích hoạt thành công!');
+    } else {
+      showToast('statusLicense', '❌ Key không hợp lệ!', true);
+    }
+    await updateLicenseStatusDisplay();
+  } catch (e) {
+    showToast('statusLicense', `❌ Lỗi: ${e.message}`, true);
+  }
+});
+
 // ═══════════════════════════════════════════
 // TAB 2: QUESTION BANK MANAGER
 // ═══════════════════════════════════════════
 
 // ── Storage Helpers ──
 async function getBankFiles() {
-  const { localBankFiles } = await chrome.storage.sync.get({ localBankFiles: 'data/cong-nghe-so.json' });
+  const { localBankFiles, bankFilesInitialized } = await chrome.storage.sync.get({
+    localBankFiles: '',
+    bankFilesInitialized: false
+  });
+
+  // First-time user: no flag set → use default bundled bank
+  if (!bankFilesInitialized && !localBankFiles) {
+    return ['data/cong-nghe-so.json'];
+  }
+
+  // User has modified bank list → use exact saved value (even if empty)
   return (localBankFiles || '')
     .split(/[,;\n]/)
     .map(s => s.trim())
@@ -151,11 +236,8 @@ async function loadBankList() {
   const banks = await getStorageBanks();
   const selectEl = document.getElementById('targetBank');
 
-  // Merge all banks
+  // Only show banks from the active files list (source of truth)
   const allBanks = new Set(files);
-  for (const name of Object.keys(banks)) {
-    allBanks.add(name);
-  }
 
   if (!allBanks.size) {
     listEl.innerHTML = '<div class="bank-empty">Chưa có ngân hàng nào. Tạo mới bên dưới!</div>';
@@ -416,6 +498,7 @@ document.getElementById('createBank').addEventListener('click', async () => {
 
   files.push(fullName);
   await saveBankFiles(files);
+  await chrome.storage.sync.set({ bankFilesInitialized: true });
 
   newBankNameInput.value = '';
   bankNameHint.textContent = '';
@@ -425,19 +508,18 @@ document.getElementById('createBank').addEventListener('click', async () => {
 
 // ── Delete Bank ──
 async function deleteBank(bankName) {
-  const isBundled = isBundledFile(bankName);
-
   // Remove from localBankFiles
   const files = await getBankFiles();
   const updated = files.filter(f => f !== bankName);
   await saveBankFiles(updated);
 
-  // Only delete storage data for custom banks
-  if (!isBundled) {
-    const banks = await getStorageBanks();
-    delete banks[bankName];
-    await saveStorageBanks(banks);
-  }
+  // Mark as initialized so default bundled bank won't re-appear
+  await chrome.storage.sync.set({ bankFilesInitialized: true });
+
+  // Always delete storage data (both bundled and custom)
+  const banks = await getStorageBanks();
+  delete banks[bankName];
+  await saveStorageBanks(banks);
 
   showToast('statusBank', `🗑️ Đã xoá "${bankName}"`);
   await loadBankList();
